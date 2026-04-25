@@ -16,7 +16,14 @@ constexpr size_t SSD_COUNT= 30;
 // number of SSDs that can be utilized in parallel; this is different from SSD_COUNT if RAID is used
 constexpr size_t SSD_PARALLELISM = SSD_COUNT;
 
-constexpr size_t READER_READ_SIZE = 4 << 20;
+// Override at build time with -DREADER_READ_SIZE_BYTES=<n>; default 512 KiB.
+// map_edges sweep on Twitter shows a U-shaped throughput curve with a
+// minimum at 512 KiB; below 256 KiB the SSDs become IOPS-bound, above
+// 1 MiB load balancing across the 12 shards starts to coarsen.
+#ifndef READER_READ_SIZE_BYTES
+#define READER_READ_SIZE_BYTES (512 * 1024)
+#endif
+constexpr size_t READER_READ_SIZE = READER_READ_SIZE_BYTES;
 
 constexpr size_t SAMPLE_SORT_BUCKET_SIZE = 4 << 10;
 
