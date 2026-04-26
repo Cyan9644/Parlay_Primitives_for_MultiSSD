@@ -256,11 +256,22 @@ inline size_t GetFileSize(const std::string &file_name) {
 }
 
 void Read(int fd, void *buffer, size_t read_size) {
-    auto size = read(fd, buffer, read_size);
-    CHECK(size == (ssize_t)read_size);
+    // Loop for large buffers for both read/write.
+    auto *p = static_cast<unsigned char*>(buffer);
+    while (read_size > 0) {
+        auto n = read(fd, p, read_size);
+        CHECK(n > 0);
+        p += n;
+        read_size -= static_cast<size_t>(n);
+    }
 }
 
 void Write(int fd, const void *buffer, size_t write_size) {
-    auto size = write(fd, buffer, write_size);
-    CHECK(size == (ssize_t)write_size);
+    auto *p = static_cast<const unsigned char*>(buffer);
+    while (write_size > 0) {
+        auto n = write(fd, p, write_size);
+        CHECK(n > 0);
+        p += n;
+        write_size -= static_cast<size_t>(n);
+    }
 }
