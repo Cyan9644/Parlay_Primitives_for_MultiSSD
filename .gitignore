@@ -3,3 +3,8 @@ MODULE.bazel.lock
 .idea
 /bazel-*
 /perf.data*
+
+# these are from the makefile I made - Peter (undergrad Peter)
+/benchmarks
+/deps
+/utils
