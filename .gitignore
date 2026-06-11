@@ -4,8 +4,9 @@ MODULE.bazel.lock
 /bazel-*
 /perf.data*
 
-# these are from the makefile I made - Peter (undergrad Peter)
+# these are from the makefile I made and other misc stuff - Peter (undergrad Peter)
 /benchmarks
 /deps
 /utils
 .direnv
+.cache
