@@ -10,3 +10,4 @@ MODULE.bazel.lock
 /utils
 .direnv
 .cache
+/compile_commands.json

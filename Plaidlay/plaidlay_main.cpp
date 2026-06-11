@@ -19,7 +19,7 @@ void sum_example(int n) {
     auto mySeq = tabulate<int>(n, [](int i){return i + 1;});
     auto squares = map(mySeq, [](int val) {return val * val;});
     // the interface here is a little different
-    int res = reduce(squares, 0, [](int a, int b) {return a + b;});
+    int res = reduce(squares, [](int a, int b) {return a + b;}, 0);
     int expect = n * (n + 1) * (2 * n + 1) / 6;
     assert(res == expect && "whoops! this sum is wrong!");
 }
@@ -38,7 +38,7 @@ void primes(int n) {
 void scan(int n) {
     using namespace plaidlayNaive;
     auto mySeq = tabulate<int>(n, [](int i){return i + 1;});
-    auto [sums, tot] = scan(mySeq, 0, [](int a, int b) {return a + b;});
+    auto [sums, tot] = scan(mySeq, [](int a, int b) {return a + b;}, 0);
     for (int i = 1; i < n; i++) {
         assert(sums[i] == i*(i+1)/2);
     }

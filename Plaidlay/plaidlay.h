@@ -55,7 +55,7 @@ namespace plaidlayNaive {
     }
     // here Func should map (U, T) -> U
     template <typename T, typename U, typename Func>
-    auto reduce(const naiveSeq<T>& seq, U identity, Func f) {
+    auto reduce(const naiveSeq<T>& seq, Func f, U identity) {
         U out = identity;
         for (const T& elem : seq) {
             out = f(out, elem);
@@ -76,7 +76,7 @@ namespace plaidlayNaive {
     }
     // Func must map (T,T) -> t
     template <typename T, typename Func>
-    std::pair<naiveSeq<T>, T> scan(const naiveSeq<T>& seq, T identity, Func f) {
+    std::pair<naiveSeq<T>, T> scan(const naiveSeq<T>& seq, Func f, T identity) {
         int n = seq.size();
         std::vector<T> out(n);
         out[0] = identity;
