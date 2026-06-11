@@ -51,7 +51,6 @@ namespace plaidlayNaive {
         for (const T& elem : seq) {
             out.push_back(f(elem));
         }
-        // this moves the vector, not cloned
         return naiveSeq<U>(out);
     }
     // here Func should map (U, T) -> U
@@ -84,7 +83,6 @@ namespace plaidlayNaive {
         for (int i = 1; i < n; i++) {
             out[i] = out[i-1] + seq[i-1];
         }
-        // this moves the vector, not cloned
-        return std::make_pair(naiveSeq<T>(out), out[n-1] + seq[n-1]);
+        return std::make_pair(std::move(naiveSeq<T>(out)), out[n-1] + seq[n-1]);
     }
 }
