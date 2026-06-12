@@ -1,0 +1,15 @@
+should we be size-aware when computing the flatten /filter
+
+
+e.g. do we allocate the intermediate filtered arrays for subseqences during the filter?
+
+write filter using library from previous paper 
+
+
+implement the data type T as a POD (plain old datatype)
+
+MapReduce first
+
+then do filter (simple filter)
+
+flatten can follow based on the block implementation
