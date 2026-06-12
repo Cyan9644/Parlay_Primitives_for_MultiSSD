@@ -26,3 +26,26 @@ Little confused on this statement about page striping. Does this mean that we're
 
 maybe the comment is saying that you shouldn't stripe in general OR they're ust staying don't run the SSDs in RAID 
 e.g. you can tell the OS to traet it like one SSD with RAID directly, so why is this a bad idea (other than being topology aware)?
+
+
+
+
+
+
+
+
+----------------------------------------------------------------------------
+
+Do the methods we write for our library actually need to interface with the SSDs directly or is this handled by something higher-level?
+
+So, the key questions are like map reduce, filter, scan, and flatten
+
+map reduce, have no order ambiguity
+
+For scan, filter, what's the order in SSD0 vs SSD1?
+imagine you;re doing a iflter with saturated SSDs (30 TB input) and we want to flter
+filter shrinks it by a lot, dat ais now 3 TB
+what should be the data on, for example, SSD8
+
+do we pack them on one SSD? do we put the elements remaining in SSD8 on SSD8?
+
