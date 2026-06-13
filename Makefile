@@ -14,7 +14,7 @@ ifdef NIX_LDFLAGS
   LDFLAGS  += $(filter -L%,$(NIX_LDFLAGS))
 endif
 
-ABSL_LIBS := $(shell find deps/abseil-cpp/install/lib64 -name '*.a' 2>/dev/null | sort)
+ABSL_LIBS := $(shell find deps/abseil-cpp/install/lib -name '*.a' 2>/dev/null | sort)
 
 UTIL_SRCS := utils/logger.cpp utils/command_line.cpp \
              utils/file_utils.cpp utils/random_number_generator.cpp
@@ -50,16 +50,19 @@ deps/parlaylib:
 deps/abseil-cpp/install:
 	mkdir -p deps
 	git clone --depth 1 --branch 20240722.1 \
-		https://github.com/abseil/abseil-cpp.git deps/abseil-cpp
+	    https://github.com/abseil/abseil-cpp.git deps/abseil-cpp
 	rm -rf deps/abseil-cpp/.git
 	cd deps/abseil-cpp && cmake -S . -B build \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-		-DABSL_BUILD_TESTING=OFF \
-		-DABSL_ENABLE_INSTALL=ON \
-		-DCMAKE_INSTALL_PREFIX=$(CURDIR)/deps/abseil-cpp/install && \
-		cmake --build build -j$$(nproc) && \
-		cmake --install build
+	    -DCMAKE_BUILD_TYPE=Release \
+	    -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+	    -DABSL_BUILD_TESTING=OFF \
+	    -DABSL_ENABLE_INSTALL=ON \
+	    -DBUILD_SHARED_LIBS=OFF \
+	    -DABSL_PROPAGATE_CXX_STD=ON \
+	    -DCMAKE_CXX_STANDARD=17 \
+	    -DCMAKE_INSTALL_PREFIX=$(CURDIR)/deps/abseil-cpp/install && \
+	    cmake --build build -j$$(nproc) && \
+	    cmake --install build
 
 # ── compilation rules ──────────────────────────────────────────────────────────
 

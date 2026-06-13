@@ -10,3 +10,5 @@ MODULE.bazel.lock
 /utils
 .direnv
 .cache
+Makefile
+ 
