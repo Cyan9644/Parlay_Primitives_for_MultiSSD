@@ -1,4 +1,5 @@
 #include "plaidlay.h"
+#include "filter.h"
 #include <cassert>
 #include <math.h>
 #include <iostream>
@@ -37,7 +38,10 @@ int main() {
     sum_example(100);
     scan(100);
     primes(20);
-    test_seq_io()
+    
+    filter()
+    // test_seq_io()
+
     return 0;
 }
 void sum_example(int n) {
