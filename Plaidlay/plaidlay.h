@@ -51,12 +51,11 @@ namespace plaidlayNaive {
         for (const T& elem : seq) {
             out.push_back(f(elem));
         }
-        // this moves the vector, not cloned
         return naiveSeq<U>(out);
     }
     // here Func should map (U, T) -> U
     template <typename T, typename U, typename Func>
-    auto reduce(const naiveSeq<T>& seq, U identity, Func f) {
+    auto reduce(const naiveSeq<T>& seq, Func f, U identity) {
         U out = identity;
         for (const T& elem : seq) {
             out = f(out, elem);
@@ -77,15 +76,14 @@ namespace plaidlayNaive {
     }
     // Func must map (T,T) -> t
     template <typename T, typename Func>
-    std::pair<naiveSeq<T>, T> scan(const naiveSeq<T>& seq, T identity, Func f) {
+    std::pair<naiveSeq<T>, T> scan(const naiveSeq<T>& seq, Func f, T identity) {
         int n = seq.size();
         std::vector<T> out(n);
         out[0] = identity;
         for (int i = 1; i < n; i++) {
             out[i] = out[i-1] + seq[i-1];
         }
-        // this moves the vector, not cloned
-        return std::make_pair(naiveSeq<T>(out), out[n-1] + seq[n-1]);
+        return std::make_pair(std::move(naiveSeq<T>(out)), out[n-1] + seq[n-1]);
     }
 }
 
