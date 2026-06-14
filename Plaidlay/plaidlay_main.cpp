@@ -1,4 +1,6 @@
-#include "plaidlay.h"
+#ifndef PLAIDLAY_H
+#define PLAIDLAY_H
+
 #include "filter.h"
 #include <cassert>
 #include <math.h>
@@ -11,7 +13,7 @@
 #include <cstring>
 #include <parlay/parallel.h>
 #include <parlay/primitives.h>
-
+#include <stdio.h>
 
 // #define num_blocks 10
 // #define block_size 512 * 512 * 4 //1 GB
@@ -32,14 +34,27 @@ double get_time_diff(struct timeval start, struct timeval end) {
     return (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1000000.0;
 }
 
-
+template<class T>
 bool test_seq_io(naiveSeq<T> sequence, int seqlen, const char* filepath);
 int main() {
     sum_example(100);
     scan(100);
     primes(20);
-    
-    filter()
+    auto mySeq = plaidlayNaive::tabulate<int>(1000, [](int i){return i + 1;});
+    auto filtered = plaidlayNaive::filter(mySeq, [](int i){ if(i== 497 || i == 631) return true; else{return false;}});
+    for (int e : filtered){
+        if (e != 497 && e != 631){
+            printf("filter wrong\n");
+        }
+        else{
+            printf("%d\n", e);
+        }
+    }
+    printf("no problem in filter\n");
+
+    auto mySeq2 = plaidlayNaive::tabulate<int>(1000000, [] (int i){return i + 1;});
+    test_seq_io(mySeq2, 1000000, "bogus.txt");
+
     // test_seq_io()
 
     return 0;
@@ -99,12 +114,18 @@ template <typename T>
 bool test_seq_io(naiveSeq<T> sequence, int seqlen, const char* filepath){
     using namespace plaidlayNaive;
 
+std::cout << "STARTING I/O TEST\n";
+std::cout << "--------------------------------\n";
+std::cout << "STARTING WRITES\n";
+std::cout << "--------------------------------\n";
 
 auto qdepth = QDEPTH;
 auto block_size = 512; //512 bytes
 auto target_size = roundUp(seqlen * sizeof(sequence[0]), block_size);
 
-plaidlayNaive::naiveSeq<int> check_sequence(seqlen);
+//no constructor for int yet, must be initialized from a cpp vector
+// naiveSeq<int> check_sequence(std::vector<int>(seqlen));
+naiveSeq<int> check_sequence{std::vector<int>(seqlen)};
 
 for(int i = 0;i < seqlen; i++){
     check_sequence[i] = sequence[i];
@@ -117,7 +138,8 @@ if(filepath == NULL){
 int filedes = open(filepath, O_WRONLY | O_DIRECT | O_CREAT | O_TRUNC, 0644);
 if(filedes < 0){
     std::cout << "file descriptor did not work";
-    goto cleanup_bad;
+    close(filedes);
+
 
 }
 
@@ -127,12 +149,19 @@ struct io_uring ring;
 
 struct timeval start, end;
 
+    auto do_cleanup = [&](bool success) {
+    io_uring_queue_exit(&ring);
+    free(buffer);
+    close(filedes);
+    unlink(filepath);
+    return success;
+};
 
 //result == seqlen ? std::cout << "all good on the O_DIRECT open" : std::cout << "Something went wrong with the O_DIRECT open";
 
 // if(result != seqlen){
 //     close(filedes);
-//     goto cleanup_bad;
+//     do_cleanup(false);
 // }
 
 
@@ -140,7 +169,7 @@ struct timeval start, end;
 
 if(posix_memalign((void**)(&buffer), 512, target_size)){
 
-    goto cleanup_bad;
+    do_cleanup(false);
 }
 
 std::memset(buffer, 0x0, target_size); //it's rounded up to the nearest block_size
@@ -155,7 +184,7 @@ std::memcpy(buffer, &sequence[0], seqlen *sizeof(sequence[0]));
 
 if((io_uring_queue_init(qdepth, &ring, 0)) < 0){
 std::cout << "io_uring init went wrong";
-goto cleanup_bad;
+do_cleanup(false);
 }
 
 long long increment = 0;
@@ -192,11 +221,11 @@ curr_qdepth++;
     auto r = io_uring_wait_cqe(&ring, &cqe);
     if(r < 0){
         std::cout << "issue in waiting for a cqe";
-        goto cleanup_bad;
+        do_cleanup(false);
     }
     else if(cqe->res < 0){
         std::cout << "issue with asynch write";
-        goto cleanup_bad;
+        do_cleanup(false);
     }
     curr_qdepth--;
     
@@ -210,7 +239,7 @@ curr_qdepth++;
         }
         else{
             std::cout << "issue with asynch write with peek";
-            goto cleanup_bad;
+            do_cleanup(false);
         }
 
     }
@@ -226,23 +255,25 @@ curr_qdepth++;
 
 gettimeofday(&end, NULL);
 
-std::cout << "writes completed, wrote " << target_size << " elements in " << get_time_diff(start,end) << " time ";
+std::cout << "writes completed, wrote " << target_size << " elements in " << get_time_diff(start,end) << " time \n";
 
  double mb_written = target_size / (1024.0 * 1024.0);
 double bandwidth = mb_written / get_time_diff(start,end) ;
 
-printf("Bandwidth: %f", bandwidth);
-printf("mb written: %f", mb_written);
+printf("Bandwidth: %f\n", bandwidth);
+printf("mb written: %f\n", mb_written);
 
 
 close(filedes);
 
-std::cout << "INITIATING READ BACK FROM DISK";
+std::cout << "--------------------------------\n";
+std::cout << "INITIATING READ BACK FROM DISK\n";
+std::cout << "--------------------------------\n";
  
 filedes = open(filepath, O_RDONLY | O_DIRECT);
 if(filedes < 0){
     std::cout << "file descriptor did not work on read";
-    goto cleanup_bad;
+    do_cleanup(false);
 
 }
 
@@ -285,11 +316,11 @@ curr_qdepth++;
     auto r = io_uring_wait_cqe(&ring, &cqe);
     if(r < 0){
         std::cout << "issue in waiting for a cqe in read";
-        goto cleanup_bad;
+        do_cleanup(false);
     }
     else if(cqe->res < 0){
         std::cout << "issue with asynch read";
-        goto cleanup_bad;
+        do_cleanup(false);
     }
     curr_qdepth--;
     
@@ -303,7 +334,7 @@ curr_qdepth++;
         }
         else{
             std::cout << "issue with asynch read with peek";
-            goto cleanup_bad;
+            do_cleanup(false);
         }
 
     }
@@ -324,13 +355,13 @@ curr_qdepth++;
 
 gettimeofday(&end_read, NULL);
 
-std::cout << "writes completed, wrote " << target_size << " elements in " << get_time_diff(start_read,end_read) << " time ";
+std::cout << "Reads completed, read " << target_size << " elements in " << get_time_diff(start_read,end_read) << " time \n";
 
  double mb_read = target_size / (1024.0 * 1024.0);
 bandwidth = mb_read/ get_time_diff(start_read,end_read) ;
 
-printf("Bandwidth: %f", bandwidth);
-printf("mb read: %f", mb_read);
+printf("Bandwidth: %f\n", bandwidth);
+printf("mb read: %f\n", mb_read);
 
 
 T* buffered = (T*) buffer;
@@ -359,7 +390,7 @@ cleanup:
     return 1;
 
 
-cleanup_bad:
+auto cleanup_bad = [&](){
     try{
     close(filedes);
     io_uring_queue_exit(&ring);
@@ -376,6 +407,7 @@ cleanup_bad:
     }
 
     return 0;
+};
 
 
 
@@ -383,3 +415,5 @@ cleanup_bad:
 }
 
 
+
+#endif

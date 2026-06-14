@@ -1,3 +1,6 @@
+#ifndef FILTER_H
+#define FILTER_H
+
 #include "plaidlay.h"
 #include <cassert>
 #include <math.h>
@@ -95,6 +98,8 @@ return flatten(outer);
 }
 
 
+
+//this method uses the cheating approach, which is to allocate for the maximal case of filter where no elements are removed
 template <typename T, typename Func>
 naiveSeq<T> naive_parallel_dram_filter(naiveSeq<T> sequence, Func f){
 
@@ -123,3 +128,7 @@ return flatten(outer);
 
 }
 
+
+
+
+#endif
