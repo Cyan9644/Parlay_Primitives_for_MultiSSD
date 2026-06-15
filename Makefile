@@ -27,7 +27,7 @@ BENCH_SRCS := benchmarks/io_benchmarks.cpp \
 BENCH_OBJS := $(BENCH_SRCS:.cpp=.o)
 
 BINARIES := $(BINDIR)/speed_test $(BINDIR)/io_uring_test $(BINDIR)/sample_sort \
-            $(BINDIR)/permutation $(BINDIR)/sequence  $(BINDIR)/plaidlaymain
+            $(BINDIR)/permutation $(BINDIR)/sequence  $(BINDIR)/plaidlaymain $(BINDIR)/externalSeqMain
 
 LINK = $(CXX) $(CXXFLAGS) $(INCLUDES) $^ -o $@ $(LDFLAGS) -Wl,--start-group $(ABSL_LIBS) -Wl,--end-group
 
@@ -88,6 +88,9 @@ $(BINDIR)/sequence: sequence.cpp $(UTIL_OBJS)
 	$(LINK)
 
 $(BINDIR)/plaidlaymain: Plaidlay/plaidlay_main.cpp $(UTIL_OBJS)
+	$(LINK)
+
+$(BINDIR)/externalSeqMain: Plaidlay/external_main.cpp $(UTIL_OBJS)
 	$(LINK)
 
 # ── cleanup ────────────────────────────────────────────────────────────────────

@@ -1,6 +1,3 @@
-#ifndef PLAIDLAY_H
-#define PLAIDLAY_H
-
 #include "filter.h"
 #include <cassert>
 #include <math.h>
@@ -408,12 +405,4 @@ auto cleanup_bad = [&](){
 
     return 0;
 };
-
-
-
-
 }
-
-
-
-#endif
