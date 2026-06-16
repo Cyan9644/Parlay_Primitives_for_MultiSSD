@@ -72,7 +72,8 @@ namespace externalSeqOps {
     }
     template <typename T, typename R = T, bool in_place = sizeof(T) == sizeof(R)>
     externalSeq<R> map(externalSeq<T> seq, const std::string& new_prefix, std::function<R(T)> f) {
-        Map(seq.files, new_prefix, f);
+    //always do out of place for now, I get a crash in place
+        Map<T, R, false>(seq.files, new_prefix, f);
         auto new_files = FindFiles(new_prefix);
         GetFileInfo(new_files);
         return externalSeq<T>(new_files, new_prefix);
@@ -87,7 +88,7 @@ namespace externalSeqOps {
     // Func here maps T -> bool
     template <typename T, typename Func>
     externalSeq<T> filter (const externalSeq<T>& seq, const std::string& new_prefix, Func f) {
-        Filter(seq.files, new_prefix, f);
+        Filter<T>(seq.files, new_prefix, f);
         auto new_files = FindFiles(new_prefix);
         GetFileInfo(new_files);
         return externalSeq<T>(new_files, new_prefix);

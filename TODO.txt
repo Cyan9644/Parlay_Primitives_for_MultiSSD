@@ -21,3 +21,5 @@ What to do now:
 Block scan (finished)
 MultiSSD filter
 Clean up code
+decide on a sequence representation
+look into existing delayed sequence papers
