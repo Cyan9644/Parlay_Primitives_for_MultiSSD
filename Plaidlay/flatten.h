@@ -1,10 +1,6 @@
 #ifndef FLATTEN_H
 #define FLATTEN_H
 
-// #include "../utils/file_info.h"
-// #include "../utils/unordered_file_reader.h"
-// #include "../utils/unordered_file_writer.h"
-
 #include "parlay/primitives.h"
 #include "plaidlay.h"
 #include <cassert>
@@ -26,122 +22,82 @@ template <typename T>
 long binary_search(const std::vector<size_t>& input, T find, long low, long high);
 
 namespace plaidlayNaive{
+    template <typename T>
+    naiveSeq<T> block_flatten_in_dram(const naiveSeq<naiveSeq<T>>& input){
+        size_t total_elements = 0;
+        size_t i = 0;
+        std::vector<size_t> over_seq(input.size());
+        over_seq[0] = 0;
+        over_seq[1] = input[0].size();
+        for(i=2;i<input.size(); i++){
+            over_seq[i] = input[i-1].size() + over_seq[i-1];
+        }
 
-template <typename T>
-naiveSeq<T> block_flatten_in_dram(const naiveSeq<naiveSeq<T>>& input){
+        i=0;
+        for (; i < input.size();i++) {
+            total_elements += input[i].size();
+        }
 
+        bool has_remainder = total_elements % BLOCKSIZE_FLATTEN;
 
+        // naiveSeq<T> block_offsets(has_remainder ?  total_elements / BLOCKSIZE_FLATTEN + 1 : total_elements / BLOCKSIZE_FLATTEN);
+        naiveSeq<T> finalseq(total_elements);
 
-size_t total_elements = 0;
-size_t i = 0;
-std::vector<size_t> over_seq(input.size());
-over_seq[0] = 0;
-over_seq[1] = input[0].size();
-for(i=2;i<input.size(); i++){
-    over_seq[i] = input[i-1].size() + over_seq[i-1];
-}
+        //compute scan over input sizes
+        // over_seq = plaidlayNaive::scan(over_seq);
 
-i=0;
-for (; i < input.size();i++) {
-    total_elements += input[i].size();
-}
+        long num_blocks = total_elements/BLOCKSIZE_FLATTEN;
 
-bool has_remainder = total_elements % BLOCKSIZE_FLATTEN;
+        parlay::parallel_for(0, num_blocks, [&](long i) {
 
-// naiveSeq<T> block_offsets(has_remainder ?  total_elements / BLOCKSIZE_FLATTEN + 1 : total_elements / BLOCKSIZE_FLATTEN);
-naiveSeq<T> finalseq(total_elements);
+            auto final_block_start = i * BLOCKSIZE_FLATTEN;
+            auto final_block_end = std::min((size_t)(((i+1) * BLOCKSIZE_FLATTEN)), total_elements);
 
-//compute scan over input sizes
-// over_seq = plaidlayNaive::scan(over_seq);
+            //find which sequence our block actually starts in in the input array 
+            auto block_actual_start = predecessor_search(over_seq, final_block_start);
+            size_t k = final_block_start;
+            while(k < final_block_end){
 
-long num_blocks = total_elements/BLOCKSIZE_FLATTEN;
+                long offset = k-over_seq[block_actual_start];
 
-parlay::parallel_for(0, num_blocks, [&](long i) {
+                if(offset == input[block_actual_start].size()){
+                    ++block_actual_start;
+                }
+                else{
+                    finalseq[k] = input[block_actual_start][offset];
+                    k++;
+                }
+        }
+        });
 
-auto final_block_start = i * BLOCKSIZE_FLATTEN;
-auto final_block_end = std::min((size_t)(((i+1) * BLOCKSIZE_FLATTEN)), total_elements);
+        if(has_remainder){
 
-//find which sequence our block actually starts in in the input array 
-auto block_actual_start = predecessor_search(over_seq, final_block_start);
-size_t k = final_block_start;
-// auto block = input[block_actual_start];
-while(k < final_block_end){
+            //pick up the rest sequentially
+            long last_index = num_blocks * BLOCKSIZE_FLATTEN;
+            //all blocks have completed at this point, so the sequential portion is responsible for elements of num_blocks * BLOCKSIZE_FLATTEN and up
+            auto final_start = predecessor_search(over_seq, last_index);
+            size_t a = last_index;
+            while(a < total_elements){
 
-long offset = k-over_seq[block_actual_start];
-
-//copy into new sequence
-// bool k_plus = false;
-// if(offset != input[block_actual_start].size()){
-//     k_plus = true;
-// }
-
-// offset == input[block_actual_start].size() ? block=input[++block_actual_start] : finalseq[k] = input[block_actual_start][offset];
-// // if(!offset == input[block_actual_start].size()){
-// if(k_plus) k++;
-
-if(offset == input[block_actual_start].size()){
-    ++block_actual_start;
-}
-else{
-    finalseq[k] = input[block_actual_start][offset];
-    k++;
-}
-
-
-}
-});
-
-// }
-
-
-
-
-if(has_remainder){
-
-//pick up the rest sequentially
-long last_index = num_blocks * BLOCKSIZE_FLATTEN;
-
-//all blocks have completed at this point, so the sequential portion is responsible for elements of num_blocks * BLOCKSIZE_FLATTEN and up
-auto final_start = predecessor_search(over_seq, last_index);
-size_t a = last_index;
-// auto block = input[final_start];
-// auto block = input[final_start];
-while(a < total_elements){
-
-long offset = a-over_seq[final_start];
-//copy into new sequence
-// bool k_plus = false;
-// if(offset != input[final_start].size()){
-//     k_plus = true;
-// }
-// offset == input[final_start].size() ? block=input[++final_start] : finalseq[k] = input[final_start][offset];
-// if(k_plus) k++;
-if(offset == input[final_start].size()){
-    ++final_start;
-}
-else{
-    finalseq[a] = input[final_start][offset];
-    a++;
-}
-
-
-
-// if(!offset == input[block_actual_start].size()){
-
-
-
-
-
-}
-
-
-
-
-
-
-}
-return finalseq;
-}
+            long offset = a-over_seq[final_start];
+            //copy into new sequence
+            // bool k_plus = false;
+            // if(offset != input[final_start].size()){
+            //     k_plus = true;
+            // }
+            // offset == input[final_start].size() ? block=input[++final_start] : finalseq[k] = input[final_start][offset];
+            // if(k_plus) k++;
+            if(offset == input[final_start].size()){
+                ++final_start;
+            }
+            else{
+                finalseq[a] = input[final_start][offset];
+                a++;
+            }
+            }
+        }
+        return finalseq;
+    }
 }
 
 
@@ -171,34 +127,20 @@ return finalseq;
 // }
 
 
-
+//finds the index of the greatest element smaller or equal to the desired value
 inline size_t predecessor_search(const std::vector<size_t>& input, size_t find){
-size_t high = input.size()-1; size_t low = 0; size_t answer;
+    size_t high = input.size()-1; size_t low = 0; size_t answer;
 
-while(low <= high){
-
-size_t mid = low + ((high-low)/2);
-if(input[mid] <= find){
-    answer = mid;
-    low = mid+1;
-
+    while(low <= high){
+        size_t mid = low + ((high-low)/2);
+        if(input[mid] <= find){
+            answer = mid;
+            low = mid+1;
+        }
+        else high = mid-1;
+    }
+    return answer;
 }
-else high = mid-1;
-
-
-
-
-}
-return answer;
-
-
-
-}
-
-
-
-
-
 
 
 

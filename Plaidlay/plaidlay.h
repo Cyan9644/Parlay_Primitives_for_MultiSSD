@@ -113,10 +113,7 @@ namespace plaidlayNaive {
         return naiveSeq<T>(res);
     }
 }
-<<<<<<< HEAD
 
 #endif
 
 
-=======
->>>>>>> refs/remotes/origin/master

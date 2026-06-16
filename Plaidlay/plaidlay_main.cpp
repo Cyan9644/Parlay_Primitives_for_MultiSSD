@@ -1,11 +1,9 @@
-<<<<<<< HEAD
 
 
-=======
->>>>>>> refs/remotes/origin/master
 #include "filter.h"
 #include <cassert>
 #include "flatten.h"
+#include "scan.h"
 #include <math.h>
 #include <iostream>
 #include <fcntl.h>
@@ -78,7 +76,22 @@ int main() {
     }
     assert(count == my_flattened_seq.size());
     std::cout << "Finished block flatten test\n";
-    std::cout << "-------------------------------";
+    std::cout << "-------------------------------\n";
+
+    std::cout << "Starting block scan test\n";
+    std::cout << "-------------------------------\n";
+    auto myseq3 = plaidlayNaive::tabulate<int>(10000, [] (int i){return i + 1;});
+    auto myseq4 = plaidlayNaive::scan(myseq3);
+    myseq3 = plaidlayNaive::block_scan(myseq3);
+    for(long i =0;i < myseq3.size(); i++){
+        assert(myseq3[i] == myseq4[i]);
+    }
+    std::cout << "Block scan test finished correctly\n";
+    std::cout << "-------------------------------\n";
+
+  
+
+
     // test_seq_io()
 
     return 0;
@@ -433,8 +446,5 @@ auto cleanup_bad = [&](){
     return 0;
 };
 }
-<<<<<<< HEAD
 
 
-=======
->>>>>>> refs/remotes/origin/master

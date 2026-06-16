@@ -15,7 +15,7 @@
 #include <parlay/primitives.h>
 
 #define NUMBLOCKS 1
-#define BLOCKSIZE_FILTER 512
+#define BLOCKSIZE 512
 //copied from plaidlay.h
 template <typename T, typename Func>
 naiveSeq<T> filter_range(const naiveSeq<T>& seq, Func f, unsigned long start, unsigned long end){
@@ -61,69 +61,70 @@ naiveSeq<T> flatten_range(const naiveSeq<naiveSeq<T>>& seq, unsigned long start,
 template <typename T, typename Func>
 naiveSeq<T> naive_parallel_dram_filter_lock(naiveSeq<T> sequence, Func f){
 
-std::vector<naiveSeq<T>> out;
-std::atomic<bool> lock = true;
-auto num_blocks = (int)(sequence.size() / BLOCKSIZE_FILTER);
-auto remainder = (int)(sequence.size() % BLOCKSIZE_FILTER);
-parlay::parallel_for(0, num_blocks, [&](long i){
+    std::vector<naiveSeq<T>> out;
+
+    std::atomic<bool> lock = true;
+
+    auto num_blocks = (int)(sequence.size() / BLOCKSIZE);
+
+    auto remainder = (int)(sequence.size() % BLOCKSIZE);
+
+    parlay::parallel_for(0, num_blocks, [&](long i){
+
+    naiveSeq<T> filtered;
+
+    i != num_blocks-1 ? filtered = plaidlayNaive::filter(plaidlayNaive::cut(sequence, BLOCKSIZE * i, BLOCKSIZE * (i+1)), f) : filtered = plaidlayNaive::filter(plaidlayNaive::cut(sequence, BLOCKSIZE * i, BLOCKSIZE * (i+1) + remainder));
+
+    bool check_yes = 1;
+
+    bool check_no = 0;
+
+    while(!(lock.compare_exchange_strong(check_yes, check_no))){
+
+        check_yes = true;
+        check_no = false;
+
+    }
+
+    out.push_back(filtered);
+    lock = 1;
 
 
-// auto filtered = filter_range(sequence,f BLOCKSIZE_FILTER * i, BLOCKSIZE_FILTER * (i+1));
-naiveSeq<T> filtered;
+    });
 
-i != num_blocks-1 ? filtered = plaidlayNaive::filter(plaidlayNaive::cut(sequence, BLOCKSIZE_FILTER * i, BLOCKSIZE_FILTER * (i+1)), f) : filtered = plaidlayNaive::filter(plaidlayNaive::cut(sequence, BLOCKSIZE_FILTER * i, BLOCKSIZE_FILTER * (i+1) + remainder));
 
-bool check_yes = 1;
-bool check_no = 0;
-while(!(lock.compare_exchange_strong(check_yes, check_no))){
 
-    check_yes = true;
-    check_no = false;
+    auto outer = naiveSeq<naiveSeq<T>>(out);
+    return plaidlayNaive::flatten(outer);;
+
 
 }
 
-out.push_back(filtered);
-lock = 1;
-
-
-
-});
-
-
-
-auto outer = naiveSeq<naiveSeq<T>>(out);
-return plaidlayNaive::flatten(outer);;
-
-
-}
-
-
-
-//this method uses the cheating approach, which is to allocate for the maximal case of filter where no elements are removed
 template <typename T, typename Func>
 naiveSeq<T> naive_parallel_dram_filter(naiveSeq<T> sequence, Func f){
 
-std::vector<naiveSeq<T>> out;
-std::atomic<bool> lock = true;
-auto num_blocks = (int)(sequence.size() / BLOCKSIZE_FILTER);
-auto remainder = (int)(sequence.size() % BLOCKSIZE_FILTER);
-out.resize(num_blocks);
-parlay::parallel_for(0, num_blocks, [&](long i){
+    std::vector<naiveSeq<T>> out;
+
+    auto num_blocks = (int)(sequence.size() / BLOCKSIZE);
+
+    auto remainder = (int)(sequence.size() % BLOCKSIZE);
+
+    out.resize(num_blocks);
+    parlay::parallel_for(0, num_blocks, [&](long i){
 
 
-out[i] = plaidlayNaive::filter(plaidlayNaive::cut(sequence, BLOCKSIZE_FILTER * i, BLOCKSIZE_FILTER * (i+1)), f);
+        out[i] = plaidlayNaive::filter(plaidlayNaive::cut(sequence, BLOCKSIZE * i, BLOCKSIZE * (i+1)), f);
 
 
-});
+    });
 
-auto remain = plaidlayNaive::filter(plaidlayNaive::cut(sequence, BLOCKSIZE_FILTER * num_blocks, BLOCKSIZE_FILTER * num_blocks + remainder), f);
+    auto remain = plaidlayNaive::filter(plaidlayNaive::cut(sequence, BLOCKSIZE * num_blocks, BLOCKSIZE * num_blocks + remainder), f);
 
-out.push_back(remain);
+    out.push_back(remain);
 
-auto outer = naiveSeq<naiveSeq<T>>(out);
+    auto outer = naiveSeq<naiveSeq<T>>(out);
 
-
-return plaidlayNaive::flatten(outer);
+    return plaidlayNaive::flatten(outer);
 
 
 }
