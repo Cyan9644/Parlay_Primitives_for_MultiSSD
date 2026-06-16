@@ -1,8 +1,11 @@
-#ifndef PLAIDLAY_H
-#define PLAIDLAY_H
+<<<<<<< HEAD
 
+
+=======
+>>>>>>> refs/remotes/origin/master
 #include "filter.h"
 #include <cassert>
+#include "flatten.h"
 #include <math.h>
 #include <iostream>
 #include <fcntl.h>
@@ -36,6 +39,8 @@ double get_time_diff(struct timeval start, struct timeval end) {
 
 template<class T>
 bool test_seq_io(naiveSeq<T> sequence, int seqlen, const char* filepath);
+
+
 int main() {
     sum_example(100);
     scan(100);
@@ -55,6 +60,25 @@ int main() {
     auto mySeq2 = plaidlayNaive::tabulate<int>(1000000, [] (int i){return i + 1;});
     test_seq_io(mySeq2, 1000000, "bogus.txt");
 
+    auto mySeqSeq = plaidlayNaive::tabulate<naiveSeq<int>>(10000, [](int i){
+    return plaidlayNaive::tabulate<int>(10000, [](int j){ return j + 1; });
+    });
+
+    std::cout << "starting block flatten test\n";
+    std::cout << "-------------------------------\n";
+    auto my_flattened_seq = plaidlayNaive::block_flatten_in_dram(mySeqSeq);
+    size_t count = 0;
+    for(auto i: mySeqSeq){
+        // int r = 0;
+
+        for(auto k : i){
+            assert(k == my_flattened_seq[count]);
+            count++;
+        }
+    }
+    assert(count == my_flattened_seq.size());
+    std::cout << "Finished block flatten test\n";
+    std::cout << "-------------------------------";
     // test_seq_io()
 
     return 0;
@@ -374,7 +398,7 @@ for(int i =0; i < seqlen; i++){
 
 
 
-std::cout << "finished correctly";
+std::cout << "finished correctly\n";
 
 
 
@@ -408,12 +432,9 @@ auto cleanup_bad = [&](){
 
     return 0;
 };
-
-
-
-
 }
+<<<<<<< HEAD
 
 
-
-#endif
+=======
+>>>>>>> refs/remotes/origin/master

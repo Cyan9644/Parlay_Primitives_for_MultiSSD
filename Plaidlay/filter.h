@@ -92,7 +92,7 @@ lock = 1;
 
 
 auto outer = naiveSeq<naiveSeq<T>>(out);
-return flatten(outer);
+return plaidlayNaive::flatten(outer);;
 
 
 }
@@ -123,7 +123,7 @@ out.push_back(remain);
 auto outer = naiveSeq<naiveSeq<T>>(out);
 
 
-return flatten(outer);
+return plaidlayNaive::flatten(outer);
 
 
 }

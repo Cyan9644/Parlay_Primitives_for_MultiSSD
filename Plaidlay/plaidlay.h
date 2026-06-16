@@ -1,6 +1,10 @@
+#pragma once
 // okay this is just a temp file to get some code going
+#ifndef PLAIDLAY_H
+#define PLAIDLAY_H
 #include <vector>
 #include <iostream>
+#include <cassert>
 
 
 template <typename T>
@@ -18,6 +22,7 @@ class naiveSeq {
     public:
         naiveSeq() {}
         naiveSeq(std::vector<T> in) : data(in) {}
+        naiveSeq(size_t n) : data(n) {}
         ~naiveSeq() {}
 
         auto begin() {return data.begin();}
@@ -85,36 +90,31 @@ namespace plaidlayNaive {
         }
         return std::make_pair(std::move(naiveSeq<T>(out)), out[n-1] + seq[n-1]);
     }
-
     template <typename T>
     naiveSeq<T> flatten(const naiveSeq<naiveSeq<T>>& seq) {
-        // naiveSeq<T> res;
         std::vector<T> res;
         for(const auto& out : seq){
             for(const auto& in : out){
-                
                 res.push_back(in);
             }
         }
         return naiveSeq<T>(res);
-
-
     }
-
-    
     template <typename T>
     naiveSeq<T> cut(const naiveSeq<T> seq, int start, int end){
-        // naiveSeq<T> res;
+        assert(start >= 0 && end >= 0);
+        assert(start <= end);
         std::vector<T> res;
         for(int i = start; i < end; i++){
             res.push_back(seq[i]);
         }
         return naiveSeq<T>(res);
-
-
     }
-    
 }
+<<<<<<< HEAD
+
+#endif
 
 
-
+=======
+>>>>>>> refs/remotes/origin/master

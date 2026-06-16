@@ -1,0 +1,1 @@
+g++ -std=c++17 -O2 -I ./parlaylib/include plaidlay_main.cpp -o plaidlay_main -lpthread -luring

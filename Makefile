@@ -14,7 +14,8 @@ ifdef NIX_LDFLAGS
   LDFLAGS  += $(filter -L%,$(NIX_LDFLAGS))
 endif
 
-ABSL_LIBS := $(shell find deps/abseil-cpp/install/lib -name '*.a' 2>/dev/null | sort)
+ABSL_LIBDIR := $(firstword $(wildcard deps/abseil-cpp/install/lib deps/abseil-cpp/install/lib64))
+ABSL_LIBS   := $(shell find $(ABSL_LIBDIR) -name '*.a' 2>/dev/null | sort)
 
 UTIL_SRCS := utils/logger.cpp utils/command_line.cpp \
              utils/file_utils.cpp utils/random_number_generator.cpp
@@ -26,7 +27,7 @@ BENCH_SRCS := benchmarks/io_benchmarks.cpp \
 BENCH_OBJS := $(BENCH_SRCS:.cpp=.o)
 
 BINARIES := $(BINDIR)/speed_test $(BINDIR)/io_uring_test $(BINDIR)/sample_sort \
-            $(BINDIR)/permutation $(BINDIR)/sequence 
+            $(BINDIR)/permutation $(BINDIR)/sequence  $(BINDIR)/plaidlaymain $(BINDIR)/externalSeqMain
 
 LINK = $(CXX) $(CXXFLAGS) $(INCLUDES) $^ -o $@ $(LDFLAGS) -Wl,--start-group $(ABSL_LIBS) -Wl,--end-group
 
@@ -84,6 +85,12 @@ $(BINDIR)/permutation: permutation.cpp $(UTIL_OBJS)
 	$(LINK)
 
 $(BINDIR)/sequence: sequence.cpp $(UTIL_OBJS)
+	$(LINK)
+
+$(BINDIR)/plaidlaymain: Plaidlay/plaidlay_main.cpp $(UTIL_OBJS)
+	$(LINK)
+
+$(BINDIR)/externalSeqMain: Plaidlay/external_main.cpp $(UTIL_OBJS)
 	$(LINK)
 
 # ── cleanup ────────────────────────────────────────────────────────────────────
