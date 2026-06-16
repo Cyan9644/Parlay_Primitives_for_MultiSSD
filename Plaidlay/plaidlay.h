@@ -1,9 +1,11 @@
 #pragma once
+#pragma once
 // okay this is just a temp file to get some code going
 #ifndef PLAIDLAY_H
 #define PLAIDLAY_H
 #include <vector>
 #include <iostream>
+#include <cassert>
 #include <cassert>
 
 
