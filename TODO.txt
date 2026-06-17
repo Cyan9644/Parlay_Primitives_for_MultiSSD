@@ -21,5 +21,13 @@ What to do now:
 Block scan (finished)
 Clean up code (finished)
 
+
+
+
+
+
+
+
+MutliSSD filter parallel
 MultiSSD flatten sequential 
 MutliSSD flatten parallel
