@@ -15,8 +15,6 @@
 #include <parlay/parallel.h>
 #include <parlay/primitives.h>
 
-#define BLOCKSIZE_FLATTEN 1000
-
 size_t predecessor_search(const std::vector<size_t>& input, size_t find);
 template <typename T>
 long binary_search(const std::vector<size_t>& input, T find, long low, long high);
@@ -38,20 +36,20 @@ namespace plaidlayNaive{
             total_elements += input[i].size();
         }
 
-        bool has_remainder = total_elements % BLOCKSIZE_FLATTEN;
+        bool has_remainder = total_elements % BLOCKSIZE;
 
-        // naiveSeq<T> block_offsets(has_remainder ?  total_elements / BLOCKSIZE_FLATTEN + 1 : total_elements / BLOCKSIZE_FLATTEN);
+        // naiveSeq<T> block_offsets(has_remainder ?  total_elements / BLOCKSIZE + 1 : total_elements / BLOCKSIZE);
         naiveSeq<T> finalseq(total_elements);
 
         //compute scan over input sizes
         // over_seq = plaidlayNaive::scan(over_seq);
 
-        long num_blocks = total_elements/BLOCKSIZE_FLATTEN;
+        long num_blocks = total_elements/BLOCKSIZE;
 
         parlay::parallel_for(0, num_blocks, [&](long i) {
 
-            auto final_block_start = i * BLOCKSIZE_FLATTEN;
-            auto final_block_end = std::min((size_t)(((i+1) * BLOCKSIZE_FLATTEN)), total_elements);
+            auto final_block_start = i * BLOCKSIZE;
+            auto final_block_end = std::min((size_t)(((i+1) * BLOCKSIZE)), total_elements);
 
             //find which sequence our block actually starts in in the input array 
             auto block_actual_start = predecessor_search(over_seq, final_block_start);
@@ -73,8 +71,8 @@ namespace plaidlayNaive{
         if(has_remainder){
 
             //pick up the rest sequentially
-            long last_index = num_blocks * BLOCKSIZE_FLATTEN;
-            //all blocks have completed at this point, so the sequential portion is responsible for elements of num_blocks * BLOCKSIZE_FLATTEN and up
+            long last_index = num_blocks * BLOCKSIZE;
+            //all blocks have completed at this point, so the sequential portion is responsible for elements of num_blocks * BLOCKSIZE and up
             auto final_start = predecessor_search(over_seq, last_index);
             size_t a = last_index;
             while(a < total_elements){
@@ -142,6 +140,32 @@ inline size_t predecessor_search(const std::vector<size_t>& input, size_t find){
     return answer;
 }
 
+
+
+
+tempate<Typename T>
+FileInfo FlattenFileSequential(const FileInfo &in_file, const std::string &out_file){
+
+    struct QueueData {
+        T *ptr;
+        size_t size;
+        size_t index;
+
+        QueueData(T *ptr, size_t size, size_t index) : ptr(ptr), size(size), index(index) {}
+    };
+    const auto cmp = [](QueueData a, QueueData b) {
+        return a.index > b.index;
+    };
+    UnorderedFileReader<T> reader;
+    reader.PrepFiles({in_file});
+    reader.Start();
+    UnorderedFileWriter<T> writer(out_file);
+    std::priority_queue<QueueData, std::vector<QueueData>, decltype(cmp)> queue(cmp);
+    constexpr size_t buffer_size_bytes = 4 << 20, buffer_size = buffer_size_bytes / sizeof(T);
+
+
+
+}
 
 
 #endif
