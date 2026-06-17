@@ -19,5 +19,7 @@ flatten can follow based on the block implementation
 What to do now:
 
 Block scan (finished)
-MultiSSD filter
-Clean up code
+Clean up code (finished)
+
+MultiSSD flatten sequential 
+MutliSSD flatten parallel
