@@ -79,7 +79,7 @@ namespace externalSeqOps {
         return externalSeq<T>(new_files, new_prefix);
     }
     // here Func should map (U, T) -> U
-    template <typename T, typename U, typename Func>
+    template <typename T, typename U=T, typename Func>
     auto reduce(const externalSeq<T>& seq, Func f, U identity) {
         parlay::monoid monoid(f, identity);
         return Reduce<T, U>(seq.files, monoid);

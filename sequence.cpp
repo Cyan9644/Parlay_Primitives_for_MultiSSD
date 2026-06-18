@@ -13,8 +13,8 @@
 #include "sequence_algorithms/filter.h"
 
 parlay::monoid monoid([](size_t a, size_t b) {
-    return a ^ b;
-}, 0);
+    return a + b;
+}, (size_t) 0);
 
 void RunReduce(int argc, char **argv) {
     CHECK(argc >= 3);
