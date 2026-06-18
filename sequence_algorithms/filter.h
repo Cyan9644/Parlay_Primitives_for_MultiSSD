@@ -26,7 +26,10 @@ FileInfo FilterFile(const FileInfo &in_file, const std::string &out_file, const 
     UnorderedFileReader<T> reader;
     reader.PrepFiles({in_file});
     reader.Start();
-    UnorderedFileWriter<T> writer(out_file);
+    UnorderedFileWriter<T> writer;
+    UnorderedWriterConfig wconfig;
+    wconfig.num_threads = 1;
+    writer.Start(std::vector<std::string>{out_file}, wconfig);
     std::priority_queue<QueueData, std::vector<QueueData>, decltype(cmp)> queue(cmp);
     constexpr size_t buffer_size_bytes = 4 << 20, buffer_size = buffer_size_bytes / sizeof(T);
     size_t buffer_index = 0;
@@ -49,9 +52,9 @@ FileInfo FilterFile(const FileInfo &in_file, const std::string &out_file, const 
             next_index += size;
             // process buffer
             size_t i = 0;
-            while (i < size) {
-                if (predicate(ptr[i])) {
-                    buffer[buffer_index] = ptr[i];
+            while (i < top.size) {
+                if (predicate(top.ptr[i])) {
+                    buffer[buffer_index] = top.ptr[i];
                     buffer_index++;
                 }
                 if (buffer_size == buffer_index) {

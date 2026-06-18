@@ -3,7 +3,7 @@
 // Outputs a binary P6 PPM image to stdout; status goes to stderr.
 //
 // Build (needs ParlayLib headers: https://github.com/cmuparlay/parlaylib):
-//   g++ -std=c++17 -O2 -I ../../deps/parlaylib/ llmcoded_raytracer.cpp -o raytracer -pthread
+//   g++ -std=c++17 -O2 -I ../../deps/parlaylib/ vibecoded_raytracer.cpp -o raytracer -pthread
 // Run:
 //   ./raytracer > out.ppm
 //   (optional) PARLAY_NUM_THREADS=8 ./raytracer > out.ppm
