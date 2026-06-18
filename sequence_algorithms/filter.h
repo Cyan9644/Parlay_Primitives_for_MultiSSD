@@ -49,7 +49,7 @@ FileInfo FilterFile(const FileInfo &in_file, const std::string &out_file, const 
                 break;
             }
             queue.pop();
-            next_index += size;
+            next_index += top.size;
             // process buffer
             size_t i = 0;
             while (i < top.size) {
@@ -77,7 +77,7 @@ FileInfo FilterFile(const FileInfo &in_file, const std::string &out_file, const 
     MakeFileEndMarker((unsigned char *) buffer,
                       end_size,
                       buffer_index * sizeof(T));
-    writer.Push(std::shared_ptr<T>(buffer, free), end_size);
+    writer.Push(std::shared_ptr<T>(buffer, free), end_size / sizeof(T));
     writer.Wait();
     size_t file_size = (write_count + 1) * buffer_size_bytes;
     size_t true_size = write_count * buffer_size_bytes + buffer_index * sizeof(T);
