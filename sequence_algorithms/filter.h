@@ -65,6 +65,7 @@ FileInfo FilterFile(const FileInfo &in_file, const std::string &out_file, const 
                 }
                 i++;
             }
+            reader.allocator.Free(top.ptr);
         }
     }
     size_t end_size = AlignUp(buffer_index * sizeof(T) + METADATA_SIZE);

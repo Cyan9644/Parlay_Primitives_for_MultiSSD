@@ -1,9 +1,14 @@
 #include "externalSeq.h"
 
+auto add = [](size_t a, size_t b) {return a + b;};
+
+void mapThroughput();
+
 int main() {
-    auto add = [](size_t a, size_t b) {return a + b;};
+    mapThroughput();
+/*
     // later on we could use macros to enforce file name matching identifier?
-    externalSeq<size_t> nums = externalSeqOps::randPerm<size_t>("nums", 9);
+    externalSeq<size_t> nums = externalSeqOps::randPerm<size_t>("nums", 12);
     // TODO: for some reason I need to provide that both are long long for the generic here otherwise I get negatives, probably overflow
     // okay size_t just works for some reason here
     std::cout << externalSeqOps::reduce<>(nums, add, 0) << std::endl;
@@ -11,5 +16,18 @@ int main() {
     std::cout << externalSeqOps::reduce<>(halved, add, 0) << std::endl;
     externalSeq<size_t> modTen = externalSeqOps::filter<>(nums, "modTen", [](size_t a) {return a % 10 == 0;});
     std::cout << externalSeqOps::reduce<>(modTen, add, 0) << std::endl;
+*/
+
+
     return 0;
+}
+void mapThroughput() {
+    parlay::internal::timer timer("Map");
+    timer.next("Start prep");
+    externalSeq<size_t> nums = externalSeqOps::randPerm<size_t>("nums", 24);
+    timer.next("Start map");
+    auto result = externalSeqOps::reduce<>(nums, add, 0);
+    double time = timer.next_time();
+    double throughput = GetThroughput(nums.files, time);
+    std::cout << "throughput is " << throughput << " GB per sec" <<  std::endl;
 }
