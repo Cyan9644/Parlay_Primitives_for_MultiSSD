@@ -49,3 +49,51 @@ what should be the data on, for example, SSD8
 
 do we pack them on one SSD? do we put the elements remaining in SSD8 on SSD8?
 
+
+
+
+--------------------------------------
+
+Ask if there's anything that we could do that would break the SSDs
+
+
+
+rank/select daat structure trading space for imrpvoign speed
+
+data struct:
+
+we scanned over the input and produced output
+
+if load balance , ard to get adjacent blocks unless we eagerly read them
+
+each thread responsible 
+blocks at granularity for 1 io per block
+
+each thread scans input range
+
+internally for each thread, reads can come back in any order
+
+
+
+Filter implementation:
+
+synchronize when all the reads are done -- in one thread or multiple?
+
+maybe a seq has 1000 blcoks, pick some small constant like 32 reads at a time
+
+we need to actually sort the pointers when the reads come back
+we sort the pointers according to the indices that we get back from the read 
+
+we need to blackbox the file reader -- we look at the pointer returned from the read and then look up what it means in our metadata
+
+
+
+
+Current:
+
+We're going to treat each sequence as living on a single file, which means that the metadata for that file gives us the total size of the sequence
+so our sequence representation can actually be a sequence of FileData objects which live in DRAM and contain the number of blocks and location on disk 
+
+
+
+

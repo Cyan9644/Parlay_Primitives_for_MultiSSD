@@ -31,3 +31,15 @@ Clean up code (finished)
 MutliSSD filter parallel
 MultiSSD flatten sequential 
 MutliSSD flatten parallel
+
+
+Issues in current parallel filter approach:
+
+
+1. too many locks on write_count and queue access -- could write our own threadsafe queue
+2. the break occurs if there's nothing on top, but if this is the case, i
+3. atomic variables should not be used to enforce mutex on multi-step processes
+
+
+
+The current approach gives each file its own reader. Should we have a single reader that can be accessed by all the threads?
