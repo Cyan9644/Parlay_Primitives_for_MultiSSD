@@ -1,6 +1,10 @@
 #ifndef FILTER_H
 #define FILTER_H
 #include <pthread.h>
+#include "utils/file_info.h"
+#include "utils/file_utils.h"
+#include "utils/unordered_file_writer.h"
+#include "utils/unordered_file_reader.h"
 #include "plaidlay.h"
 #include <cassert>
 #include <math.h>
@@ -13,12 +17,18 @@
 #include <cstring>
 #include <parlay/parallel.h>
 #include <parlay/primitives.h>
+#include <queue>
 
 #define NUMBLOCKS 1
 #define BLOCKSIZE 512
 //copied from plaidlay.h
 
-pthread_mutex_t locking = pthread_mutex_INITIALIZER; 
+
+namespace plaidlayNaive {
+    template <typename T>
+    naiveSeq<T> block_flatten_in_dram(const naiveSeq<naiveSeq<T>>& input);
+}
+pthread_mutex_t locking = PTHREAD_MUTEX_INITIALIZER; 
 template <typename T, typename Func>
 naiveSeq<T> filter_range(const naiveSeq<T>& seq, Func f, unsigned long start, unsigned long end){
 
@@ -494,7 +504,7 @@ FileInfo FilterFileParallel_in_block(const FileInfo &in_file, const std::string 
                     }
 
                 }
-                auto new_seq = pladilayNaive::block_flatten_in_dram(myseqseq);
+                auto new_seq = plaidlayNaive::block_flatten_in_dram(myseqseq);
                 auto new_ct = 0;
                 for(; new_ct < counter; new_ct++){
                     buffer[block_start+new_ct] = new_seq[new_ct];

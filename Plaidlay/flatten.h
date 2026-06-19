@@ -58,7 +58,7 @@ namespace plaidlayNaive{
 
                 long offset = k-over_seq[block_actual_start];
 
-                if(offset == input[block_actual_start].size()){
+                if((size_t) offset == input[block_actual_start].size()){
                     ++block_actual_start;
                 }
                 else{
@@ -85,7 +85,7 @@ namespace plaidlayNaive{
             // }
             // offset == input[final_start].size() ? block=input[++final_start] : finalseq[k] = input[final_start][offset];
             // if(k_plus) k++;
-            if(offset == input[final_start].size()){
+            if((size_t)offset == input[final_start].size()){
                 ++final_start;
             }
             else{
@@ -143,7 +143,7 @@ inline size_t predecessor_search(const std::vector<size_t>& input, size_t find){
 
 
 
-tempate<Typename T>
+template<typename T>
 FileInfo FlattenFileSequential(const FileInfo &in_file, const std::string &out_file){
 
     struct QueueData {

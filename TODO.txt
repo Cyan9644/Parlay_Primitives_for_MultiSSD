@@ -43,3 +43,5 @@ Issues in current parallel filter approach:
 
 
 The current approach gives each file its own reader. Should we have a single reader that can be accessed by all the threads?
+
+MultiSSD scan naive

@@ -4,6 +4,7 @@
 #include "sequence_algorithms/map.h"
 #include "sequence_algorithms/filter.h"
 #include "sequence_algorithms/reduce.h"
+#include "scan.h"
 #include <vector>
 
 // this is some seq, later possibly will implement delaying, that "owns" some
@@ -92,5 +93,16 @@ namespace externalSeqOps {
         auto new_files = FindFiles(new_prefix);
         GetFileInfo(new_files);
         return externalSeq<T>(new_files, new_prefix);
+    }
+
+    //test for naive file scan
+    template <typename T>
+    externalSeq<T> naiveScan(const externalSeq<T>& seq, const std::string& new_prefix){
+        Scan<T>(seq.files, new_prefix);
+        auto filer = FindFiles(new_prefix);
+        GetFileInfo(filer);
+        return externalSeq<T>(filer, new_prefix);
+
+
     }
 }

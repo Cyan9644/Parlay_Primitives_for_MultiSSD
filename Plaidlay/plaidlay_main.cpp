@@ -83,7 +83,7 @@ int main() {
     auto myseq3 = plaidlayNaive::tabulate<int>(10000, [] (int i){return i + 1;});
     auto myseq4 = plaidlayNaive::scan(myseq3);
     myseq3 = plaidlayNaive::block_scan(myseq3);
-    for(long i =0;i < myseq3.size(); i++){
+    for(size_t i =0;i < myseq3.size(); i++){
         assert(myseq3[i] == myseq4[i]);
     }
     std::cout << "Block scan test finished correctly\n";
@@ -156,7 +156,7 @@ std::cout << "--------------------------------\n";
 std::cout << "STARTING WRITES\n";
 std::cout << "--------------------------------\n";
 
-auto qdepth = QDEPTH;
+unsigned qdepth = QDEPTH;
 auto block_size = 512; //512 bytes
 auto target_size = roundUp(seqlen * sizeof(sequence[0]), block_size);
 
