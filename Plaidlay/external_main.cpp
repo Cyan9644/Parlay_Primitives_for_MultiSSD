@@ -22,6 +22,7 @@ int main() {
     externalSeq<size_t> halved2 = externalSeqOps::map<size_t, size_t>(nums2, "halved", [](size_t x) { return x / 2; });
     std::cout << externalSeqOps::reduce<>(halved2, add, (size_t)0) << std::endl;
     externalSeq<size_t> scanner = externalSeqOps::naiveScan<>(nums2, (std::string) "scan");
+    externalSeqOps::check_in_mem(scanner, (std::string) "scan");
     // std::cout << externalSeqOps::reduce<>(modTen, add, (size_t)0) << std::endl;
 
 

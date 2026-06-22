@@ -7,6 +7,8 @@
 #include "scan.h"
 #include <vector>
 
+
+#define BUFFERSIZE 4096 //2 ** 12
 // this is some seq, later possibly will implement delaying, that "owns" some
 // number of files on drive with owns in quotes because the file system handles
 // memory
@@ -95,6 +97,7 @@ namespace externalSeqOps {
         return externalSeq<T>(new_files, new_prefix);
     }
 
+
     //test for naive file scan
     template <typename T>
     externalSeq<T> naiveScan(const externalSeq<T>& seq, const std::string& new_prefix){
@@ -103,6 +106,49 @@ namespace externalSeqOps {
         GetFileInfo(filer);
         return externalSeq<T>(filer, new_prefix);
 
+    
 
     }
+
+      // Usually the part after the prefix is the index, but if it's empty, we just ignore it.
+        // auto index_substring = path_str.substr(index + 1 + prefix.size());
+        // if (!index_substring.empty()) {
+        //     file_index = std::stol(index_substring);
+        // }
+        // result.emplace_back(path_str, file_index, 0, dir_entry.file_size());
+
+    //this should currently only work for a single file
+    template <typename T> 
+    void check_in_mem(const externalSeq<T>& seq, const std::string& new_prefix){
+        auto filer = FindFiles(new_prefix); //filer is now a std::vector of FileInfos
+        auto file = filer[0];//get very first file
+        int filedes = open(file.file_name.c_str(), O_RDWR, 0644);
+        struct stat checker;
+        if(fstat(filedes, &checker) != 0){
+            printf("something went wrong when checking file length with fstat");
+        }
+        off_t size = checker.st_size;
+        size_t buffer[BUFFERSIZE];
+        if(read(filedes, buffer, BUFFERSIZE) < 0){
+             printf("something went wrong when checking file length with fstat");
+        }
+        for(int i =0; i < BUFFERSIZE; i++){
+            printf("%d ", buffer[i]);
+        }
+
+
+        close(filedes);
+        
+
+
+
+    }
+    // template <typename T>
+    // void write_random(const const externalSeq<T>& seq, const std::string& new_prefix){
+        
+
+    //     // auto iota = parlay::iota(0, 8192, [&](size_t i)){
+    //             std::iota(numbers.begin(), numbers.end(), 10);
+    //     // }
+    // }
 }

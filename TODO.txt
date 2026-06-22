@@ -18,16 +18,6 @@ flatten can follow based on the block implementation
 
 What to do now:
 
-Block scan (finished)
-Clean up code (finished)
-
-
-
-
-
-
-
-
 MutliSSD filter parallel
 MultiSSD flatten sequential 
 MutliSSD flatten parallel
@@ -41,7 +31,17 @@ Issues in current parallel filter approach:
 3. atomic variables should not be used to enforce mutex on multi-step processes
 
 
+06/20/2026----------------------------------------------------------------------------------
 
 The current approach gives each file its own reader. Should we have a single reader that can be accessed by all the threads?
+NO: having a single reader/writer does not work because as-is, each thread knows exactly where its contribution is going;
+if there were a single file accessor then when we poll we could get data belonging to any of the thirty files. Then the threads
+need some communication and have to share data
 
-MultiSSD scan naive
+
+TODO:
+MultiSSD scan naive (finished)
+Compilation not working? what is absl/log/log.h? This does not appear in the github
+Lock-free queues
+
+
