@@ -39,15 +39,20 @@ struct External_Sequence{
 
     std::vector<chunk_header> ordered_underlying_sequence;
 
+    External_Sequence(size_t length) : ordered_underlying_sequence(length){}
+    
+    size_t size() const{
+        return this->ordered_underlying_sequence.size();
+    }
+    std::vector<chunk_header>& getSeq(External_Sequence&);
+
+    iterator begin() {return ordered_underlying_sequence.begin();}
+    iterator end(){return ordered_underlying_sequence.end();}
 };
 
 
-
-
-
-
-std::vector<std::vector<chunk_header>>& getSeq(External_Sequence* seq);
-
+// std::vector<std::vector<chunk_header>>& getSeq(External_Sequence* seq);
+// std::vector<chunk_header>& getSeq(External_Sequence&);
 
 
 #endif
