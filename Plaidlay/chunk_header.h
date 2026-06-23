@@ -37,13 +37,17 @@ size_t get_index(chunk_header* chunk);
 
 struct External_Sequence{
 
-    std::vector<std::vector<chunk_header>> underlying_sequence;
+    std::vector<chunk_header> ordered_underlying_sequence;
+
 };
 
 
 
+
+
+
 std::vector<std::vector<chunk_header>>& getSeq(External_Sequence* seq);
-y
+
 
 
 #endif
