@@ -40,7 +40,8 @@ BENCH_OBJS := $(BENCH_SRCS:.cpp=.o)
 BINARIES := $(BINDIR)/speed_test $(BINDIR)/io_uring_test $(BINDIR)/sample_sort \
             $(BINDIR)/permutation $(BINDIR)/sequence  $(BINDIR)/plaidlaymain $(BINDIR)/externalSeqMain \
             $(BINDIR)/scanVerify $(BINDIR)/chunkSeqMain $(BINDIR)/permTest $(BINDIR)/mapTest \
-            $(BINDIR)/reduceTest $(BINDIR)/filterTest $(BINDIR)/bwCompare $(BINDIR)/chunkRaytracer
+            $(BINDIR)/reduceTest $(BINDIR)/filterTest $(BINDIR)/bwCompare \
+            $(BINDIR)/raytracer $(BINDIR)/pathTracer
 
 # ChunkSequence correctness tests (each exits 0 on PASS, non-zero on FAIL).
 TEST_BINARIES := $(BINDIR)/permTest $(BINDIR)/mapTest $(BINDIR)/reduceTest $(BINDIR)/filterTest
@@ -145,7 +146,10 @@ $(BINDIR)/filterTest: ChunkSequence/tests/filter_test.cpp $(UTIL_OBJS)
 $(BINDIR)/bwCompare: ChunkSequence/bench/bw_compare.cpp $(UTIL_OBJS)
 	$(LINK)
 
-$(BINDIR)/chunkRaytracer: ChunkSequence/examples/chunk_raytracer.cpp $(UTIL_OBJS)
+$(BINDIR)/raytracer: ChunkSequence/examples/raytracer.cpp $(UTIL_OBJS)
+	$(LINK)
+
+$(BINDIR)/pathTracer: ChunkSequence/examples/path_tracer.cpp $(UTIL_OBJS)
 	$(LINK)
 
 # ── cleanup ────────────────────────────────────────────────────────────────────

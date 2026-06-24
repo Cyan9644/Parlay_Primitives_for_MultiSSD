@@ -85,7 +85,7 @@ ChunkSequence/
   chunk_filter.h            ChunkFilter – chunk-level filter (tightly packed output)
   tests/                    correctness tests (perm_test, map_test, reduce_test, filter_test → permTest/mapTest/reduceTest/filterTest)
   bench/                    scaling benchmark (bw_compare.cpp → bwCompare, driver + matplotlib plotter)
-  examples/                 example programs (chunk_raytracer.cpp → chunkRaytracer, make_png.py post-processor)
+  examples/                 example programs (raytracer.cpp → raytracer, path_tracer.cpp → pathTracer, make_png.py post-processor)
 Plaidlay/                   external-scan / scan-verify experiments
 benchmarks/                 throughput benchmarks (speed-test entry point)
 deps/                       parlaylib (header-only), abseil-cpp (built as static libs)
