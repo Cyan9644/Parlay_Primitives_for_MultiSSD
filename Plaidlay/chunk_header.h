@@ -30,7 +30,7 @@ size_t index;
 
 std::string get_filename(chunk_header* chunk);
 
-size_t get_begin_address(chunk_header* chunk);
+// size_t get_begin_address(chunk_header* chunk);
 size_t get_bytes_used(chunk_header* chunk);
 size_t get_index(chunk_header* chunk);
 
@@ -46,8 +46,11 @@ struct External_Sequence{
     }
     std::vector<chunk_header>& getSeq(External_Sequence&);
 
-    iterator begin() {return ordered_underlying_sequence.begin();}
-    iterator end(){return ordered_underlying_sequence.end();}
+        
+    std::vector<chunk_header>::iterator begin() {return ordered_underlying_sequence.begin();}
+    std::vector<chunk_header>::iterator end(){return ordered_underlying_sequence.end();}
+    
+    size_t get_begin_address(chunk_header* chunk);
 };
 
 
