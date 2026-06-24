@@ -33,14 +33,20 @@ void Map(std::vector<FileInfo> files, std::string result_prefix, std::function<R
                     ptr[i] = f(ptr[i]);
                 }
                 result = (R *) ptr;
+                // The buffer belongs to the reader's pool (one big aligned_alloc
+                // sub-divided), so it must be returned via allocator.Free, NOT
+                // free()'d — free() here corrupts the heap.
+                writer.Push(std::shared_ptr<R>(result, [&reader](R *p) {
+                    reader.allocator.Free((T *) p);
+                }), n, file_index, element_index * sizeof(R));
             } else {
                 result = (R *) aligned_alloc(O_DIRECT_MEMORY_ALIGNMENT, n * sizeof(R));
                 for (size_t i = 0; i < n; i++) {
                     result[i] = f(ptr[i]);
                 }
                 reader.allocator.Free(ptr);
+                writer.Push(std::shared_ptr<R>(result, free), n, file_index, element_index * sizeof(R));
             }
-            writer.Push(std::shared_ptr<R>(result, free), n, file_index, element_index * sizeof(R));
         }
     }, 1);
     writer.Wait();

@@ -14,6 +14,17 @@ ifdef NIX_LDFLAGS
   LDFLAGS  += $(filter -L%,$(NIX_LDFLAGS))
 endif
 
+# If liburing.h is not on the default search path, find it in the Nix store.
+ifeq ($(shell echo '\#include <liburing.h>' | $(CXX) -x c++ - -fsyntax-only 2>/dev/null; echo $$?),0)
+else
+  LIBURING_INC := $(firstword $(wildcard /nix/store/*-liburing-*-dev/include))
+  LIBURING_LIB := $(firstword $(wildcard /nix/store/*-liburing-[0-9]*/lib))
+  ifneq ($(LIBURING_INC),)
+    INCLUDES += -I$(LIBURING_INC)
+    LDFLAGS  += -L$(LIBURING_LIB)
+  endif
+endif
+
 ABSL_LIBDIR := $(firstword $(wildcard deps/abseil-cpp/install/lib deps/abseil-cpp/install/lib64))
 ABSL_LIBS   := $(shell find $(ABSL_LIBDIR) -name '*.a' 2>/dev/null | sort)
 
@@ -28,15 +39,34 @@ BENCH_OBJS := $(BENCH_SRCS:.cpp=.o)
 
 BINARIES := $(BINDIR)/speed_test $(BINDIR)/io_uring_test $(BINDIR)/sample_sort \
             $(BINDIR)/permutation $(BINDIR)/sequence  $(BINDIR)/plaidlaymain $(BINDIR)/externalSeqMain \
-            $(BINDIR)/scanVerify
+            $(BINDIR)/scanVerify $(BINDIR)/chunkSeqMain $(BINDIR)/permTest $(BINDIR)/mapTest \
+            $(BINDIR)/reduceTest $(BINDIR)/bwCompare
+
+# ChunkSequence correctness tests (each exits 0 on PASS, non-zero on FAIL).
+TEST_BINARIES := $(BINDIR)/permTest $(BINDIR)/mapTest $(BINDIR)/reduceTest
 
 LINK = $(CXX) $(CXXFLAGS) $(INCLUDES) $^ -o $@ $(LDFLAGS) -Wl,--start-group $(ABSL_LIBS) -Wl,--end-group
 
-.PHONY: all clean distclean deps
+.PHONY: all clean distclean deps test
 
 all:
 	$(MAKE) deps
 	$(MAKE) $(BINARIES)
+
+# ── tests ──────────────────────────────────────────────────────────────────────
+
+# Build and run every ChunkSequence correctness test in sequence.  Runs all of
+# them even if one fails, then exits non-zero if any failed.  Pass extra args
+# (e.g. a custom element count) via TEST_ARGS, e.g. `make test TEST_ARGS=8000000`.
+test: $(TEST_BINARIES)
+	@fail=0; \
+	for t in $(TEST_BINARIES); do \
+	  echo "==================== $$t $(TEST_ARGS) ===================="; \
+	  $$t $(TEST_ARGS) || fail=1; \
+	  echo; \
+	done; \
+	if [ $$fail -ne 0 ]; then echo "SOME TESTS FAILED"; exit 1; \
+	else echo "ALL TESTS PASSED"; fi
 
 # ── dependency fetching ────────────────────────────────────────────────────────
 
@@ -95,6 +125,21 @@ $(BINDIR)/externalSeqMain: Plaidlay/external_main.cpp $(UTIL_OBJS)
 	$(LINK)
 
 $(BINDIR)/scanVerify: Plaidlay/scan_verify.cpp $(UTIL_OBJS)
+	$(LINK)
+
+$(BINDIR)/chunkSeqMain: ChunkSequence/chunk_seq_main.cpp $(UTIL_OBJS)
+	$(LINK)
+
+$(BINDIR)/permTest: ChunkSequence/tests/perm_test.cpp $(UTIL_OBJS)
+	$(LINK)
+
+$(BINDIR)/mapTest: ChunkSequence/tests/map_test.cpp $(UTIL_OBJS)
+	$(LINK)
+
+$(BINDIR)/reduceTest: ChunkSequence/tests/reduce_test.cpp $(UTIL_OBJS)
+	$(LINK)
+
+$(BINDIR)/bwCompare: ChunkSequence/bench/bw_compare.cpp $(UTIL_OBJS)
 	$(LINK)
 
 # ── cleanup ────────────────────────────────────────────────────────────────────
