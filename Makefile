@@ -1,6 +1,6 @@
 CXX      := g++
 CXXFLAGS := -std=c++17 -O2 -Wall -fno-omit-frame-pointer
-INCLUDES := -I. -Ideps/parlaylib -Ideps/abseil-cpp/install/include
+INCLUDES := -I. -Ideps/parlaylib -Ideps/abseil-cpp/install/include -Ideps/stb
 LDFLAGS  := -luring -lpthread
 
 BINDIR := bazel-bin
