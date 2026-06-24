@@ -23,7 +23,7 @@ make bazel-bin/plaidlaymain
 make bazel-bin/externalSeqMain
 make bazel-bin/scanVerify
 
-# Run the ChunkSequence correctness tests (permTest, mapTest, reduceTest).
+# Run the ChunkSequence correctness tests (permTest, mapTest, reduceTest, filterTest).
 # Builds them if needed, runs each, and exits non-zero if any fails.
 make test
 make test TEST_ARGS=8000000   # override the per-test element count
@@ -82,8 +82,10 @@ ChunkSequence/
   chunk_seq_reader.h        async chunk-level reader (io_uring)
   chunk_map.h               ChunkMap   – chunk-level map
   chunk_reduce.h            ChunkReduce – chunk-level reduce
-  tests/                    correctness tests (perm_test, map_test, reduce_test → permTest/mapTest/reduceTest)
+  chunk_filter.h            ChunkFilter – chunk-level filter (tightly packed output)
+  tests/                    correctness tests (perm_test, map_test, reduce_test, filter_test → permTest/mapTest/reduceTest/filterTest)
   bench/                    scaling benchmark (bw_compare.cpp → bwCompare, driver + matplotlib plotter)
+  examples/                 example programs (chunk_raytracer.cpp → chunkRaytracer, make_png.py post-processor)
 Plaidlay/                   external-scan / scan-verify experiments
 benchmarks/                 throughput benchmarks (speed-test entry point)
 deps/                       parlaylib (header-only), abseil-cpp (built as static libs)
@@ -180,7 +182,7 @@ Preserves element order within each file using a priority queue keyed on `elemen
 
 An alternative data layout and set of primitives that address data at **chunk** granularity instead of whole-file granularity.
 
-The chunk primitives live in the `ChunkSequenceOps` namespace (declared in `chunk_seq.h`): `tabulate`, `perm`, `ChunkMap` (`chunk_map.h`), and `ChunkReduce` (`chunk_reduce.h`).  Call them qualified, e.g. `ChunkSequenceOps::ChunkMap(...)`.
+The chunk primitives live in the `ChunkSequenceOps` namespace (declared in `chunk_seq.h`): `tabulate`, `perm`, `ChunkMap` (`chunk_map.h`), `ChunkReduce` (`chunk_reduce.h`), and `ChunkFilter` (`chunk_filter.h`).  Call them qualified, e.g. `ChunkSequenceOps::ChunkMap(...)`.
 
 ### `chunk` / `chunk_seq`  (`chunk_seq.h`)
 
@@ -200,7 +202,7 @@ struct chunk_seq { std::vector<chunk> chunks; };
 
 **Convention**: a `chunk_seq` corresponds to exactly **one file per drive** (i.e. `SSD_COUNT` files total, one on each SSD mount point).  All chunks point into those files at offsets that are multiples of `CHUNK_SIZE`, which is itself a multiple of `O_DIRECT_MULTIPLE`, so every read is naturally aligned for O_DIRECT io_uring without extra padding logic. On creating a sequence via tabulate, the chunks are randomly assigned to the drives, balls in bins style. This saturates all drives in parallel.  
 
-**Index-ordered invariant**: `chunk_seq.chunks` is always stored in index order, i.e. `chunks[i].index == i`.  `tabulate` establishes this, and every primitive that returns a `chunk_seq` (`ChunkMap`, …) must preserve it so callers can index by position without a lookup.  
+**Index-ordered invariant**: `chunk_seq.chunks` is always stored in index order, i.e. `chunks[i].index == i`.  `tabulate` establishes this, and every primitive that returns a `chunk_seq` (`ChunkMap`, `ChunkFilter`, …) must preserve it so callers can index by position without a lookup.  
 The `chunk_seq_reader` opens each per-drive file once per worker thread (via its fd cache) and issues individual `CHUNK_SIZE`-aligned reads for each chunk, letting io_uring pipeline them across drives.
 
 ### `ChunkSequenceReader<T>`  (`chunk_seq_reader.h`)
@@ -264,6 +266,25 @@ R ChunkSequenceOps::ChunkReduce(const chunk_seq& seq, Monoid monoid);
 ```
 
 Same monoid protocol as `Reduce`.
+
+### `ChunkFilter`  (`chunk_filter.h`)
+
+```cpp
+template <typename T>
+chunk_seq ChunkSequenceOps::ChunkFilter(const chunk_seq& seq, const std::string& result_prefix,
+                                        std::function<bool(T)> pred);
+```
+
+Filters elements by `pred`, writing survivors as a **tightly packed** chunk_seq.  Unlike `ChunkMap`, the output size is unknown upfront, so output files are not pre-fallocated — they grow via `pwrite` at `CHUNK_SIZE`-aligned offsets.  All output chunks except the final one have `used == CHUNK_SIZE` (dense packing).
+
+Algorithm (batches of `FILTER_BATCH_SIZE = 128` input chunks):
+1. Collect a batch from the reader, sort by `chunk_index` (reader returns in completion order).
+2. Filter in-place in parallel (`parlay::parallel_for`): compact survivors to front of each buffer.
+3. Compute prefix sums over survivor counts to determine output positions.
+4. Parallel scatter: each input chunk writes its survivors to the correct offset(s) in pre-allocated output buffers — no races because prefix sums guarantee non-overlapping destination ranges.
+5. Flush full output chunks to the writer (balls-in-bins drive assignment); carry leftover survivors to the next batch.
+
+Returns an index-ordered `chunk_seq`.  Final chunk's `used` field holds the true survivor byte count; the rest are zero-padded to `CHUNK_SIZE` for O_DIRECT alignment.
 
 ---
 

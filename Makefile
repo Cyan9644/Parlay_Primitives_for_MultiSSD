@@ -40,10 +40,10 @@ BENCH_OBJS := $(BENCH_SRCS:.cpp=.o)
 BINARIES := $(BINDIR)/speed_test $(BINDIR)/io_uring_test $(BINDIR)/sample_sort \
             $(BINDIR)/permutation $(BINDIR)/sequence  $(BINDIR)/plaidlaymain $(BINDIR)/externalSeqMain \
             $(BINDIR)/scanVerify $(BINDIR)/chunkSeqMain $(BINDIR)/permTest $(BINDIR)/mapTest \
-            $(BINDIR)/reduceTest $(BINDIR)/bwCompare
+            $(BINDIR)/reduceTest $(BINDIR)/filterTest $(BINDIR)/bwCompare $(BINDIR)/chunkRaytracer
 
 # ChunkSequence correctness tests (each exits 0 on PASS, non-zero on FAIL).
-TEST_BINARIES := $(BINDIR)/permTest $(BINDIR)/mapTest $(BINDIR)/reduceTest
+TEST_BINARIES := $(BINDIR)/permTest $(BINDIR)/mapTest $(BINDIR)/reduceTest $(BINDIR)/filterTest
 
 LINK = $(CXX) $(CXXFLAGS) $(INCLUDES) $^ -o $@ $(LDFLAGS) -Wl,--start-group $(ABSL_LIBS) -Wl,--end-group
 
@@ -139,7 +139,13 @@ $(BINDIR)/mapTest: ChunkSequence/tests/map_test.cpp $(UTIL_OBJS)
 $(BINDIR)/reduceTest: ChunkSequence/tests/reduce_test.cpp $(UTIL_OBJS)
 	$(LINK)
 
+$(BINDIR)/filterTest: ChunkSequence/tests/filter_test.cpp $(UTIL_OBJS)
+	$(LINK)
+
 $(BINDIR)/bwCompare: ChunkSequence/bench/bw_compare.cpp $(UTIL_OBJS)
+	$(LINK)
+
+$(BINDIR)/chunkRaytracer: ChunkSequence/examples/chunk_raytracer.cpp $(UTIL_OBJS)
 	$(LINK)
 
 # ── cleanup ────────────────────────────────────────────────────────────────────

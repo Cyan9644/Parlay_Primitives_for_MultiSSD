@@ -18,8 +18,8 @@
 #include "utils/logger.h"
 #include "utils/unordered_file_writer.h"
 
-const size_t CHUNK_SIZE = 1024 * 1024 * 4; // 4MB, this is the number of bytes not number of indices
-const size_t ELEMS_PER_CHUNK = CHUNK_SIZE / sizeof(uint64_t); // 524,288 elements per chunk
+constexpr size_t CHUNK_SIZE = 1024 * 1024 * 4; // 4MB, this is the number of bytes not number of indices
+constexpr size_t ELEMS_PER_CHUNK = CHUNK_SIZE / sizeof(uint64_t); // 524,288 elements per chunk
 
 struct chunk {
     std::string filename; // the file that this chunk lives in
@@ -84,10 +84,13 @@ namespace ChunkSequenceOps {
  * Writes go through UnorderedFileWriter (io_uring) into pre-fallocated files.
  * A queue of 64 in-flight buffers (256 MB) caps DRAM usage.
  */
+template<typename T>
 chunk_seq tabulate(size_t n, const std::string& result_prefix,
-                   std::function<uint64_t(size_t)> f) {
-    using T = uint64_t;
-    const size_t num_chunks = (n + ELEMS_PER_CHUNK - 1) / ELEMS_PER_CHUNK;
+                   std::function<T(size_t)> f) {
+    static_assert(CHUNK_SIZE % sizeof(T) == 0,
+        "sizeof(T) must divide CHUNK_SIZE for O_DIRECT alignment");
+    const size_t ept = CHUNK_SIZE / sizeof(T);
+    const size_t num_chunks = (n + ept - 1) / ept;
     const size_t num_drives = GetSSDList().size();
 
     // Randomly assign each chunk to a drive for balanced SSD utilization.
@@ -133,8 +136,8 @@ chunk_seq tabulate(size_t n, const std::string& result_prefix,
     // data is written).
     std::vector<chunk> chunks(num_chunks);
     for (size_t i = 0; i < num_chunks; i++) {
-        const size_t start = i * ELEMS_PER_CHUNK;
-        const size_t count = std::min(ELEMS_PER_CHUNK, n - start);
+        const size_t start = i * ept;
+        const size_t count = std::min(ept, n - start);
         chunks[i] = {filenames[drive_of[i]], slot_of[i] * CHUNK_SIZE, count * sizeof(T), i};
     }
 
@@ -158,14 +161,14 @@ chunk_seq tabulate(size_t n, const std::string& result_prefix,
     const size_t num_gen_threads = std::min((size_t)parlay::num_workers(), num_chunks);
     parlay::parallel_for(0, num_gen_threads, [&](size_t t) {
         for (size_t i = t; i < num_chunks; i += num_gen_threads) {
-            const size_t start = i * ELEMS_PER_CHUNK;
-            const size_t count = std::min(ELEMS_PER_CHUNK, n - start);
+            const size_t start = i * ept;
+            const size_t count = std::min(ept, n - start);
 
             T* buf = (T*)aligned_alloc(O_DIRECT_MEMORY_ALIGNMENT, CHUNK_SIZE);
             CHECK(buf != nullptr) << "tabulate: buffer allocation failed";
             for (size_t j = 0; j < count; j++) buf[j] = f(start + j);
-            if (count < ELEMS_PER_CHUNK)
-                memset(buf + count, 0, (ELEMS_PER_CHUNK - count) * sizeof(T));
+            if (count < ept)
+                memset(buf + count, 0, (ept - count) * sizeof(T));
 
             // Hand ownership of this buffer to the writer (freed once its write
             // completes) and move on to the next chunk in this thread's slice.
@@ -183,7 +186,8 @@ chunk_seq tabulate(size_t n, const std::string& result_prefix,
 }
 
 chunk_seq perm(size_t n) {
-    return tabulate(n, "perm", [](size_t i) { return (uint64_t)i; });
+    return tabulate<uint64_t>(n, "perm",
+        std::function<uint64_t(size_t)>([](size_t i) { return (uint64_t)i; }));
 }
 
 } // namespace ChunkSequenceOps
