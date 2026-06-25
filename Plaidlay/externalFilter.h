@@ -12,20 +12,25 @@
 #include "chunk_header.h"
 #include <liburing.h>
 #include <cstring>
+#include <random>
+#include <array>
+#include <algorithm>
 #include <parlay/parallel.h>
 #include <parlay/primitives.h>
+#include "utils/unordered_file_reader_modified.h"
+#include "utils/unordered_file_writer_modified.h"
 
 
-// #define NUM_READ_THREADS 30
 #define NUM_SSDS 30
+// #define NUM_CHUNKS_PER_BATCH 30
 
 
 template<typename T>
-External_Sequence ExternalFilter(External_Sequence &seq, const std::function<bool(const T)>& predicate, const std::vector<string> &new_filenames) {
+External_Sequence ExternalFilter(External_Sequence &seq, const std::function<bool(const T)>& predicate, const std::vector<std::string> &new_filenames) {
     // std::vector<chunk_header> chunk_headers = seq.ordered_underlying_sequence;
     // std::atomic<bool> lock = true;
     auto& chunk_headers = seq.ordered_underlying_sequence;
-    UnorderedFileReader<T> reader;
+    UnorderedChunkReader<T, 4 << 20> reader;
     reader.PrepFiles(chunk_headers); //prepfiles needs to be changed to accomodate chunk headers
     reader.Start();
 
@@ -43,16 +48,17 @@ External_Sequence ExternalFilter(External_Sequence &seq, const std::function<boo
     // std::vector<chunk_header>* chunk_header_arr = &((std::vector<chunk_header>*)sequence.ordered_underlying_sequence);
     std::vector<chunk_header>* chunk_header_arr = &sequence.ordered_underlying_sequence;
     constexpr size_t buffer_size_bytes = 4 << 20, buffer_size = buffer_size_bytes / sizeof(T);
-    UnorderedFileWriter<T> writer;
-    UnorderedWriterConfig wconfig;
+    UnorderedChunkWriter<T> writer;
+    UnorderedChunkWriterConfig wconfig;
     wconfig.num_threads = 2; 
 
     //new_filenames is a list of NUM_SSDS length that contains filenames, one for each SSD.
     //we want to sample from this list when we push
-    // writer.Start(std::vector<std::string>{new_filenames}, wconfig);
-    writer.Start({new_filenames}, wconfig);
+    // new_filenames is already a vector<string>; pass it straight through
+    // (wrapping it in braces makes the std::string/vector overloads ambiguous).
+    writer.Start(new_filenames, wconfig);
 
-    T* buffer;
+    std::vector<T*> buffer(NUM_SSDS);
     
     // unsigned long block_index = 0;
     size_t write_count = 0;
@@ -66,7 +72,10 @@ External_Sequence ExternalFilter(External_Sequence &seq, const std::function<boo
     std::mt19937 gen(rd()); //?
     while(read_count < expected_reads){
 
-    buffer = (T*)aligned_alloc(O_DIRECT_MEMORY_ALIGNMENT, buffer_size_bytes * NUM_SSDS);
+    for(int i = 0; i < NUM_SSDS; i++){
+        buffer[i] = (T*)aligned_alloc(O_DIRECT_MEMORY_ALIGNMENT, buffer_size_bytes);
+    }
+
     // std::vector<UnorderedFileReader<T>> readers;
     // parlay::parallel_for(0, readers.size(), [&](long i){
     //     readers[i].prepFiles()
@@ -96,8 +105,8 @@ External_Sequence ExternalFilter(External_Sequence &seq, const std::function<boo
     // int random_number = distrib(gen);
     // size_t base_offset = file_offsets[random_number].fetch_add(buffer_size_bytes * NUM_SSDS);
     parlay::parallel_for(0, NUM_SSDS, [&](size_t i){
-    
-    size_t buffer_index = i * buffer_size;
+
+    size_t buffer_index = 0;
     size_t next_index = 0;
     //poll is threadsafe
     auto [ptr, size, _, index, which_chunk, filename] = reader.Poll(); //this poll can return an arbitrary chunk, so we're going to need to 
@@ -122,7 +131,7 @@ External_Sequence ExternalFilter(External_Sequence &seq, const std::function<boo
         //every individual size is less than or equal to buffer_size
         while (j < size) {
                 if (predicate(ptr[j])) {
-                    buffer[buffer_index] = ptr[j];
+                    buffer[i][buffer_index] = ptr[j];
                     buffer_index++;
                 }
                 // if (buffer_size == buffer_index) {
@@ -203,27 +212,26 @@ External_Sequence ExternalFilter(External_Sequence &seq, const std::function<boo
             if(!(bad_flags[r])){
                 size_t base_offset = file_offsets[random_holder[r]].fetch_add(buffer_size_bytes);
                 (*chunk_header_arr)[write_count * NUM_SSDS + slot_for[r]].begin_address = base_offset;
-                writer.Push((buffer + r * buffer_size), buffer_size, random_holder[r]);
+                writer.Push(std::shared_ptr<T>(buffer[r], free), buffer_size, random_holder[r], base_offset);
             }
             else{
-                continue;
+                free(buffer[r]);
                 }
             }
-            
-        }
-       
-    
-        // free(buffer);
-        
 
-        //write_count currently tracks the number of batches submitted, not the number of individual pushes
+        //write_count tracks the batch index; must increment here so subsequent batches use the correct slot range
         write_count++;
+        }
+
+        //somehow we need to figure out a way to free the buffer
+
+        // free(buffer);
 
 
         //the buffer will be reallocated at the top of the while loop
         // buffer = (T*)aligned_alloc(O_DIRECT_MEMORY_ALIGNMENT, buffer_size_bytes);
         // buffer_index = 0;
-    }
+    // }
     
     
 
@@ -245,6 +253,11 @@ External_Sequence ExternalFilter(External_Sequence &seq, const std::function<boo
     writer.Wait();
     // size_t file_size = (write_count + 1) * buffer_size_bytes * NUM_SSDS;
     // size_t true_size = write_count * buffer_size_bytes + buffer_index * NUM_SSDS * sizeof(T);
+
+    
+    size_t total_valid = (expected_reads - 1) * NUM_SSDS + (chunk_headers.size() % NUM_SSDS == 0 ? NUM_SSDS : chunk_headers.size() % NUM_SSDS);
+    chunk_header_arr->resize(total_valid);
+
     std::sort(sequence.begin(), sequence.end(), [&](const chunk_header& i, const chunk_header& j){
         return i.index < j.index;
     });
