@@ -24,8 +24,9 @@ make bazel-bin/externalSeqMain
 make bazel-bin/scanVerify
 
 # Run the ChunkSequence correctness tests (permTest, mapTest, reduceTest, filterTest,
-# scanTest, combinedTest — the last chains the primitives together and sweeps edge-case
-# sizes).  Builds them if needed, runs each, and exits non-zero if any fails.
+# scanTest, combinedTest, delayedTest — combinedTest chains the eager primitives and
+# delayedTest covers the fused delayed pipeline; both sweep edge-case sizes).  Builds
+# them if needed, runs each, and exits non-zero if any fails.
 make test
 make test TEST_ARGS=8000000   # override the per-test element count
 
@@ -84,9 +85,10 @@ ChunkSequence/
   chunk_map.h               ChunkMap   – chunk-level map
   chunk_reduce.h            ChunkReduce – chunk-level reduce
   chunk_filter.h            ChunkFilter – chunk-level filter (tightly packed output)
-  chunk_scan.h              ChunkScan  – chunk-level inclusive prefix scan
-  tests/                    correctness tests (perm_test, map_test, reduce_test, filter_test, scan_test, combined_test → permTest/mapTest/reduceTest/filterTest/scanTest/combinedTest)
-  bench/                    scaling benchmark (bw_compare.cpp → bwCompare, driver + matplotlib plotter)
+  chunk_scan.h              ChunkScan  – chunk-level exclusive prefix scan
+  chunk_delayed.h           delayed (fused) map/reduce/scan/filter/tabulate (ChunkSequenceOps::delayed)
+  tests/                    correctness tests (perm_test, map_test, reduce_test, filter_test, scan_test, combined_test, delayed_test → permTest/…/combinedTest/delayedTest)
+  bench/                    scaling benchmarks (bw_compare.cpp → bwCompare; delayed_compare.cpp → bwDelayed; driver + matplotlib plotter)
   examples/                 example programs (raytracer.cpp → raytracer, path_tracer.cpp → pathTracer, make_png.py post-processor)
 Plaidlay/                   external-scan / scan-verify experiments
 benchmarks/                 throughput benchmarks (speed-test entry point)
@@ -184,7 +186,7 @@ Preserves element order within each file using a priority queue keyed on `elemen
 
 An alternative data layout and set of primitives that address data at **chunk** granularity instead of whole-file granularity.
 
-The chunk primitives live in the `ChunkSequenceOps` namespace (declared in `chunk_seq.h`): `tabulate`, `perm`, `ChunkMap` (`chunk_map.h`), `ChunkReduce` (`chunk_reduce.h`), `ChunkFilter` (`chunk_filter.h`), and `ChunkScan` (`chunk_scan.h`).  Call them qualified, e.g. `ChunkSequenceOps::ChunkMap(...)`.
+The chunk primitives live in the `ChunkSequenceOps` namespace (declared in `chunk_seq.h`): `tabulate`, `perm`, `ChunkMap` (`chunk_map.h`), `ChunkReduce` (`chunk_reduce.h`), `ChunkFilter` (`chunk_filter.h`), and `ChunkScan` (`chunk_scan.h`).  Call them qualified, e.g. `ChunkSequenceOps::ChunkMap(...)`.  These are all **eager** (every op reads from and writes back to SSD).  A **delayed/fused** variant lives in the nested `ChunkSequenceOps::delayed` namespace (`chunk_delayed.h`) — see *Delayed (fused) sequences* below.
 
 ### `chunk` / `chunk_seq`  (`chunk_seq.h`)
 
@@ -307,6 +309,41 @@ Out-of-core, two-level (block) scan.  Data is too large for DRAM, but there is o
 3. **Pass 2** (second read pass + one write pass): re-read each chunk and run a sequential exclusive scan seeded with `offset[chunk_index]`, writing the result with the same one-file-per-drive layout as `ChunkMap`/`tabulate` (balls-in-bins drive assignment, `CHUNK_SIZE`-aligned slots, pre-fallocated files).
 
 Returns an index-ordered `chunk_seq` (same length as the input) plus the total.  In-place optimization applies when `T == R` (the reader buffer is scanned and handed straight to the writer; the input element is read before the exclusive prefix overwrites it).
+
+### Delayed (fused) sequences  (`chunk_delayed.h`)
+
+A port of parlaylib's *block-iterable-delayed* (BID) design to the out-of-core
+setting, in the nested `ChunkSequenceOps::delayed` namespace.  The eager primitives
+above round-trip every intermediate through the SSDs; a delayed sequence **fuses** an
+operation chain so intermediates never touch disk.  `map` is lazy, `reduce`/`force`
+consume in a single read pass, and `scan` is *partially delayed*.  Call qualified,
+e.g. `ChunkSequenceOps::delayed::reduce(...)`.
+
+A "block" is one 4 MiB chunk: parlay workers run in parallel across chunks and
+sequentially within a chunk (the same shape as the eager consumer loops).  A delayed
+sequence is a templated *(source + per-chunk iterator factory)*; everything is
+templated (not `std::function`) so the fused chain inlines.  Two source kinds:
+`delay(seq)` over an on-SSD `chunk_seq`, and `tabulate(n, f)` over a generated index
+range (no source files — `reduce`/`scan` over it do zero source I/O).
+
+```cpp
+namespace d = ChunkSequenceOps::delayed;
+auto s  = d::delay(seq);                          // wrap an on-SSD chunk_seq (lazy)
+auto t  = d::tabulate(n, [](size_t i){ ... });    // generated source, no files
+auto m  = d::map(s, f);                           // lazy; composes with no I/O
+uint64_t r       = d::reduce(m, monoid);          // forces: one read pass, zero writes
+auto [sd, total] = d::scan(m, monoid);            // partially delayed (offsets, then lazy)
+chunk_seq out    = d::force(m, "out_prefix");     // materialize to SSD (index-ordered)
+chunk_seq flt    = d::filter(m, "flt_prefix", pred);  // terminal, ChunkFilter-style packing
+```
+
+- `map` returns a delayed sequence of the same kind, composing element-wise with no temp buffer and no I/O — chain arbitrarily.
+- `reduce` folds under a `ChunkReduce`-style monoid (operating on the *post-map* element type, `decltype` of the fused chain) in one read pass.
+- `scan` (exclusive, parlay convention) does one read pass for the block offsets, then returns `{delayed_seq, total}` whose second pass stays lazy; further maps fuse on top, and forcing/reducing the result triggers the second read pass.
+- `force` materializes any delayed sequence to a real `chunk_seq` with the same balls-in-bins one-file-per-drive layout as `ChunkMap`; it allocates a fresh output buffer per chunk (no in-place reuse, so scan chains stay correct).
+- `filter` is a terminal modeled on `ChunkFilter` (index-contiguous 128-chunk batches, dense packing) that reads through the fused delayed iterator, so preceding maps cost no extra I/O.
+- For `reduce(map(map(seq,f),g),m)` the eager path moves 3 reads + 2 writes; the delayed path moves 1 read — quantified by `bench/delayed_compare.cpp` (→ `bwDelayed`).
+- **Lifetime**: a delayed sequence (and any `scan` result derived from it) holds a pointer to its source `chunk_seq`; the source must outlive every terminal call.  `flatten` is omitted — chunks hold plain POD, so there is nothing nested to flatten.
 
 ---
 
