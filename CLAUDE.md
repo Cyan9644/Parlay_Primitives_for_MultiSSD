@@ -23,8 +23,9 @@ make bazel-bin/plaidlaymain
 make bazel-bin/externalSeqMain
 make bazel-bin/scanVerify
 
-# Run the ChunkSequence correctness tests (permTest, mapTest, reduceTest, filterTest).
-# Builds them if needed, runs each, and exits non-zero if any fails.
+# Run the ChunkSequence correctness tests (permTest, mapTest, reduceTest, filterTest,
+# scanTest, combinedTest — the last chains the primitives together and sweeps edge-case
+# sizes).  Builds them if needed, runs each, and exits non-zero if any fails.
 make test
 make test TEST_ARGS=8000000   # override the per-test element count
 
@@ -83,7 +84,8 @@ ChunkSequence/
   chunk_map.h               ChunkMap   – chunk-level map
   chunk_reduce.h            ChunkReduce – chunk-level reduce
   chunk_filter.h            ChunkFilter – chunk-level filter (tightly packed output)
-  tests/                    correctness tests (perm_test, map_test, reduce_test, filter_test → permTest/mapTest/reduceTest/filterTest)
+  chunk_scan.h              ChunkScan  – chunk-level inclusive prefix scan
+  tests/                    correctness tests (perm_test, map_test, reduce_test, filter_test, scan_test, combined_test → permTest/mapTest/reduceTest/filterTest/scanTest/combinedTest)
   bench/                    scaling benchmark (bw_compare.cpp → bwCompare, driver + matplotlib plotter)
   examples/                 example programs (raytracer.cpp → raytracer, path_tracer.cpp → pathTracer, make_png.py post-processor)
 Plaidlay/                   external-scan / scan-verify experiments
@@ -182,7 +184,7 @@ Preserves element order within each file using a priority queue keyed on `elemen
 
 An alternative data layout and set of primitives that address data at **chunk** granularity instead of whole-file granularity.
 
-The chunk primitives live in the `ChunkSequenceOps` namespace (declared in `chunk_seq.h`): `tabulate`, `perm`, `ChunkMap` (`chunk_map.h`), `ChunkReduce` (`chunk_reduce.h`), and `ChunkFilter` (`chunk_filter.h`).  Call them qualified, e.g. `ChunkSequenceOps::ChunkMap(...)`.
+The chunk primitives live in the `ChunkSequenceOps` namespace (declared in `chunk_seq.h`): `tabulate`, `perm`, `ChunkMap` (`chunk_map.h`), `ChunkReduce` (`chunk_reduce.h`), `ChunkFilter` (`chunk_filter.h`), and `ChunkScan` (`chunk_scan.h`).  Call them qualified, e.g. `ChunkSequenceOps::ChunkMap(...)`.
 
 ### `chunk` / `chunk_seq`  (`chunk_seq.h`)
 
@@ -277,14 +279,34 @@ chunk_seq ChunkSequenceOps::ChunkFilter(const chunk_seq& seq, const std::string&
 
 Filters elements by `pred`, writing survivors as a **tightly packed** chunk_seq.  Unlike `ChunkMap`, the output size is unknown upfront, so output files are not pre-fallocated — they grow via `pwrite` at `CHUNK_SIZE`-aligned offsets.  All output chunks except the final one have `used == CHUNK_SIZE` (dense packing).
 
-Algorithm (batches of `FILTER_BATCH_SIZE = 128` input chunks):
-1. Collect a batch from the reader, sort by `chunk_index` (reader returns in completion order).
+Element order is preserved.  The input is processed in **index-contiguous** batches of `FILTER_BATCH_SIZE = 128` chunks: batch `k` reads exactly the slice `seq.chunks[k*128 : (k+1)*128)` with its own `ChunkSequenceReader`, so even though the reader delivers chunks in arbitrary completion order, every chunk in a batch belongs to that contiguous index range.  Sorting within the batch then yields true global order before packing.  (A single whole-sequence reader would let a later chunk land in an earlier batch and scramble the survivor stream — see the `order_cross_batch` case in `filter_test.cpp`.)
+
+Algorithm (per batch of `FILTER_BATCH_SIZE = 128` input chunks):
+1. Read the batch's contiguous slice and sort by `chunk_index` (reader returns in completion order, but only chunks from this slice).
 2. Filter in-place in parallel (`parlay::parallel_for`): compact survivors to front of each buffer.
 3. Compute prefix sums over survivor counts to determine output positions.
 4. Parallel scatter: each input chunk writes its survivors to the correct offset(s) in pre-allocated output buffers — no races because prefix sums guarantee non-overlapping destination ranges.
 5. Flush full output chunks to the writer (balls-in-bins drive assignment); carry leftover survivors to the next batch.
 
 Returns an index-ordered `chunk_seq`.  Final chunk's `used` field holds the true survivor byte count; the rest are zero-padded to `CHUNK_SIZE` for O_DIRECT alignment.
+
+### `ChunkScan`  (`chunk_scan.h`)
+
+```cpp
+template <typename T, typename R = T, typename Monoid>
+std::pair<chunk_seq, R> ChunkSequenceOps::ChunkScan(const chunk_seq& seq,
+                                                    const std::string& result_prefix,
+                                                    Monoid monoid);
+```
+
+**Exclusive** prefix scan: `out[i] = monoid(in[0], …, in[i-1])`, with `out[0] = monoid.identity`.  Same monoid protocol as `ChunkReduce` (`monoid.identity`, `monoid(a, b)`).  Returns `{result_seq, total}` where `total = monoid(in[0], …, in[n-1])` is the grand reduction (the parlay scan convention).
+
+Out-of-core, two-level (block) scan.  Data is too large for DRAM, but there is one accumulator per chunk, so the `O(c)` block-sum array fits in memory:
+1. **Pass 1** (one read pass): reduce each chunk independently in parallel, storing the per-chunk total into `chunk_sums[chunk_index]`.
+2. **Block prefix** (sequential, `O(c)` in RAM): exclusive prefix over `chunk_sums` → `offset[i]` = reduction of every element in chunks strictly before `i` (the seed for chunk `i`); the running accumulator after the last chunk is the returned `total`.  `c` is small, so a sequential loop beats invoking `parlay::scan`.
+3. **Pass 2** (second read pass + one write pass): re-read each chunk and run a sequential exclusive scan seeded with `offset[chunk_index]`, writing the result with the same one-file-per-drive layout as `ChunkMap`/`tabulate` (balls-in-bins drive assignment, `CHUNK_SIZE`-aligned slots, pre-fallocated files).
+
+Returns an index-ordered `chunk_seq` (same length as the input) plus the total.  In-place optimization applies when `T == R` (the reader buffer is scanned and handed straight to the writer; the input element is read before the exclusive prefix overwrites it).
 
 ---
 

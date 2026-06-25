@@ -1,7 +1,10 @@
 #include <iostream>
 #include <set>
+#include <vector>
 #include <cstdlib>
+#include <cstring>
 #include <unistd.h>
+#include <fcntl.h>
 #include <functional>
 
 #include "absl/log/check.h"
@@ -23,6 +26,91 @@ static void cleanup_prefix(const std::string& prefix) {
     const auto& ssds = GetSSDList();
     for (size_t d = 0; d < ssds.size(); d++)
         unlink(GetFileName(prefix, d).c_str());
+}
+
+// Builds perm(n), applies ChunkFilter, consolidates the survivor stream in index
+// order to a local file, and verifies every element equals expected_at(j) — i.e.
+// that filter PRESERVES global element order across batch boundaries (which the
+// order-insensitive sum check in run_filter_test cannot catch).
+static bool run_order_test(
+    const std::string& name,
+    size_t n,
+    std::function<bool(uint64_t)> pred,
+    std::function<uint64_t(size_t)> expected_at,
+    size_t expected_count)
+{
+    std::cout << "  " << name
+              << "  (n=" << n << ", expected=" << expected_count << ")\n" << std::flush;
+
+    chunk_seq seq = ChunkSequenceOps::perm(n);
+
+    const std::string out_prefix    = "filter_test_out";
+    const std::string consolidated  = "filter_test_order_consolidated";
+    chunk_seq filtered = ChunkSequenceOps::ChunkFilter<uint64_t>(seq, out_prefix, pred);
+
+    bool pass = true;
+
+    // Count check up front (consolidate writes exactly the survivor stream).
+    size_t actual_count = 0;
+    for (const auto& c : filtered.chunks)
+        actual_count += c.used / sizeof(uint64_t);
+    if (actual_count != expected_count) {
+        std::cout << "    FAIL count: got=" << actual_count
+                  << " expected=" << expected_count << "\n";
+        pass = false;
+    } else {
+        std::cout << "    count  OK\n";
+    }
+
+    // Write survivors to a local file in index order, then read back sequentially
+    // and compare each element to the expected in-order value.
+    filtered.consolidate(consolidated);
+
+    int fd = open(consolidated.c_str(), O_RDONLY);
+    if (fd < 0) {
+        std::cout << "    FAIL open(" << consolidated << "): " << strerror(errno) << "\n";
+        pass = false;
+    } else {
+        constexpr size_t BUF_ELEMS = (1 << 20);  // 8 MiB worth of uint64_t per read
+        std::vector<uint64_t> buf(BUF_ELEMS);
+        size_t j = 0;
+        bool order_ok = true;
+        while (order_ok) {
+            const ssize_t got = read(fd, buf.data(), BUF_ELEMS * sizeof(uint64_t));
+            if (got < 0) {
+                std::cout << "    FAIL read: " << strerror(errno) << "\n";
+                pass = order_ok = false;
+                break;
+            }
+            if (got == 0) break;  // EOF
+            const size_t count = (size_t)got / sizeof(uint64_t);
+            for (size_t i = 0; i < count; i++, j++) {
+                const uint64_t expected = expected_at(j);
+                if (buf[i] != expected) {
+                    std::cout << "    FAIL order: element " << j
+                              << " got " << buf[i] << " expected " << expected << "\n";
+                    pass = order_ok = false;
+                    break;
+                }
+            }
+        }
+        close(fd);
+        if (order_ok && j != expected_count) {
+            std::cout << "    FAIL order: read " << j
+                      << " elements, expected " << expected_count << "\n";
+            pass = false;
+        } else if (order_ok) {
+            std::cout << "    order  OK\n";
+        }
+    }
+
+    std::cout << "    => " << (pass ? "PASS" : "FAIL") << "\n\n";
+
+    cleanup_prefix("perm");
+    cleanup_prefix(out_prefix);
+    unlink(consolidated.c_str());
+
+    return pass;
 }
 
 // Builds perm(n), applies ChunkFilter with pred, verifies count / packing /
@@ -225,6 +313,20 @@ int main(int argc, char* argv[]) {
             [](uint64_t x) { return x % 2 == 0; },
             expected,
             /*expected_sum=*/(uint64_t)(expected - 1) * expected);
+    }
+
+    // ── 8. Order preservation across batch boundaries ────────────────────────
+    // 256 input chunks = 2 full batches.  x%2==0 keeps exactly half; for perm the
+    // in-order survivors are 0,2,4,… so element j must equal 2*j.  Any cross-batch
+    // reordering (chunks arriving out of completion order) breaks this.
+    {
+        const size_t n = 256 * ELEMS_PER_CHUNK;
+        all_pass &= run_order_test(
+            "order_cross_batch",
+            n,
+            [](uint64_t x) { return x % 2 == 0; },
+            [](size_t j) -> uint64_t { return 2ULL * j; },
+            /*expected_count=*/n / 2);
     }
 
     std::cout << (all_pass ? "ALL PASS" : "SOME FAILED") << "\n";

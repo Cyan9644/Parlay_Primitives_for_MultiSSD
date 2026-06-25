@@ -89,10 +89,6 @@ chunk_seq ChunkFilter(const chunk_seq& seq,
     std::vector<chunk> out_chunks;
     size_t out_idx = 0;
 
-    ChunkSequenceReader<T> reader;
-    reader.PrepChunks(seq);
-    reader.Start(5, 32, 16);
-
     UnorderedWriterConfig wcfg;
     wcfg.num_threads   = num_drives;
     wcfg.io_uring_size = 32;
@@ -103,17 +99,29 @@ chunk_seq ChunkFilter(const chunk_seq& seq,
 
     struct FC { T* buf; size_t n; size_t idx; };
 
-    size_t chunks_done = 0;
-    while (chunks_done < n_in) {
-        const size_t batch_n = std::min(FILTER_BATCH_SIZE, n_in - chunks_done);
+    // Process the input in index-contiguous batches.  Each batch reads exactly the
+    // slice seq.chunks[base, base+batch_n) with its own reader, so batch k always
+    // holds input chunks [k*B, (k+1)*B) regardless of io_uring completion order.
+    // This is what preserves global element order across batches: the reader is
+    // unordered, but every chunk it delivers belongs to this batch, and we sort by
+    // index below before packing.  Peak DRAM is one batch (<=128 buffers) at a time.
+    for (size_t base = 0; base < n_in; base += FILTER_BATCH_SIZE) {
+        const size_t batch_n = std::min(FILTER_BATCH_SIZE, n_in - base);
 
-        // 1. Collect batch_n chunks from the reader (arrives in completion order).
+        // 1. Read this batch's contiguous slice (arrives in completion order, but
+        //    only ever chunks from [base, base+batch_n)).
+        chunk_seq sub;
+        sub.chunks.assign(seq.chunks.begin() + base,
+                          seq.chunks.begin() + base + batch_n);
+        ChunkSequenceReader<T> reader;
+        reader.PrepChunks(sub);
+        reader.Start(5, 32, 16);
+
         std::vector<FC> batch(batch_n);
         for (size_t i = 0; i < batch_n; i++) {
             auto [ptr, n, cidx] = reader.Poll();
             batch[i] = {ptr, n, cidx};
         }
-        chunks_done += batch_n;
 
         // 2. Restore logical order so that prefix sums give consistent output positions.
         std::sort(batch.begin(), batch.end(),

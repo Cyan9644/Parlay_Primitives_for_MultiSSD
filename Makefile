@@ -40,11 +40,11 @@ BENCH_OBJS := $(BENCH_SRCS:.cpp=.o)
 BINARIES := $(BINDIR)/speed_test $(BINDIR)/io_uring_test $(BINDIR)/sample_sort \
             $(BINDIR)/permutation $(BINDIR)/sequence  $(BINDIR)/plaidlaymain $(BINDIR)/externalSeqMain \
             $(BINDIR)/scanVerify $(BINDIR)/chunkSeqMain $(BINDIR)/permTest $(BINDIR)/mapTest \
-            $(BINDIR)/reduceTest $(BINDIR)/filterTest $(BINDIR)/bwCompare \
-            $(BINDIR)/raytracer $(BINDIR)/pathTracer
+            $(BINDIR)/reduceTest $(BINDIR)/filterTest $(BINDIR)/scanTest $(BINDIR)/combinedTest \
+            $(BINDIR)/bwCompare $(BINDIR)/raytracer $(BINDIR)/pathTracer
 
 # ChunkSequence correctness tests (each exits 0 on PASS, non-zero on FAIL).
-TEST_BINARIES := $(BINDIR)/permTest $(BINDIR)/mapTest $(BINDIR)/reduceTest $(BINDIR)/filterTest
+TEST_BINARIES := $(BINDIR)/permTest $(BINDIR)/mapTest $(BINDIR)/reduceTest $(BINDIR)/filterTest $(BINDIR)/scanTest $(BINDIR)/combinedTest
 
 LINK = $(CXX) $(CXXFLAGS) $(INCLUDES) $^ -o $@ $(LDFLAGS) -Wl,--start-group $(ABSL_LIBS) -Wl,--end-group
 
@@ -141,6 +141,12 @@ $(BINDIR)/reduceTest: ChunkSequence/tests/reduce_test.cpp $(UTIL_OBJS)
 	$(LINK)
 
 $(BINDIR)/filterTest: ChunkSequence/tests/filter_test.cpp $(UTIL_OBJS)
+	$(LINK)
+
+$(BINDIR)/scanTest: ChunkSequence/tests/scan_test.cpp $(UTIL_OBJS)
+	$(LINK)
+
+$(BINDIR)/combinedTest: ChunkSequence/tests/combined_test.cpp $(UTIL_OBJS)
 	$(LINK)
 
 $(BINDIR)/bwCompare: ChunkSequence/bench/bw_compare.cpp $(UTIL_OBJS)
