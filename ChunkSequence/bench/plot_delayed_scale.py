@@ -7,8 +7,7 @@ Reads the CSV produced by bench_delayed_scale.sh:
       eager_mmr_s,delayed_mmr_s,inmem_mmr_s,
       eager_fmm_s,delayed_fmm_s,inmem_fmm_s,agree
 
-and renders one figure with two panels, y = effective-input throughput
-(logical input bytes 8n / wall time, GB/s):
+and renders one figure with two panels, y = operation time (s):
 
   * left  (read-bound):  map|map|reduce — in-mem delayed, chunk-delayed,
                          chunk-eager, and the raw-read ceiling;
@@ -16,8 +15,8 @@ and renders one figure with two panels, y = effective-input throughput
                          chunk-eager, with the raw-read line as a reference.
 
 Blank in-memory fields (n past the RAM budget) are skipped, so the in-memory
-line simply stops at the cliff.  x is base-2 log (problem size); y is base-2 log
-(throughput) so both the DRAM line and the SSD lines stay readable.
+line simply stops at the cliff.  Both axes are base-2 log with tick labels
+formatted as 2^k.
 
 Usage:
     python3 plot_delayed_scale.py [csv_path] [png_path]
@@ -26,6 +25,7 @@ Requires matplotlib:
     pip install matplotlib
 """
 import csv
+import math
 import os
 import sys
 
@@ -33,6 +33,7 @@ try:
     import matplotlib
     matplotlib.use("Agg")  # headless: write a file, no display needed
     import matplotlib.pyplot as plt
+    import matplotlib.ticker as ticker
 except ImportError:
     sys.stderr.write(
         "error: matplotlib is required to plot.\n"
@@ -42,7 +43,11 @@ except ImportError:
     sys.exit(1)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-GIB = float(1 << 30)
+
+
+def _pow2_fmt(val, _):
+    n = round(math.log2(val))
+    return f'$2^{{{n}}}$'
 
 
 def _f(s):
@@ -51,13 +56,13 @@ def _f(s):
     return float(s) if s else None
 
 
-def throughput(ns, times):
-    """(xs, ys) of effective input GB/s for the non-blank points only."""
+def runtime(ns, times):
+    """(xs, ys) of wall-clock seconds for the non-blank points only."""
     xs, ys = [], []
     for n, t in zip(ns, times):
         if t is not None and t > 0.0:
             xs.append(n)
-            ys.append((n * 8.0 / GIB) / t)
+            ys.append(t)
     return xs, ys
 
 
@@ -106,13 +111,14 @@ def main():
         (ax_w, "force(map(x+1) | map(2x))  — write-bound", write_lines),
     ]:
         for label, times, style in lines:
-            xs, ys = throughput(n, times)
+            xs, ys = runtime(n, times)
             if xs:
                 ax.plot(xs, ys, style, label=label, markersize=5)
         ax.set_xscale("log", base=2)
         ax.set_yscale("log", base=2)
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(_pow2_fmt))
         ax.set_xlabel("n (elements)")
-        ax.set_ylabel("effective input throughput (GB/s)")
+        ax.set_ylabel("operation time (s)")
         ax.set_title(title)
         ax.grid(True, which="both", linestyle=":", linewidth=0.5)
         ax.legend()

@@ -53,8 +53,8 @@ ChunkSequence/bench/bench_chunk_vs_seq.sh [min_exp] [max_exp] [reps]   # default
 # -> writes ChunkSequence/bench/results/chunk_bw.csv (the driver force-rebuilds bwCompare)
 
 python3 ChunkSequence/bench/plot_chunk_bw.py     # needs matplotlib
-# -> ChunkSequence/bench/results/chunk_bw.png : two log-log panels (both axes base-2),
-#    left Map vs ChunkMap, right Reduce vs ChunkReduce
+# -> ChunkSequence/bench/results/chunk_bw.png : two log-log panels (both axes base-2,
+#    y ticks labelled as 2^k), left Map vs ChunkMap, right Reduce vs ChunkReduce
 ```
 
 Each run needs ~`32·n` bytes on the SSD mounts (chunk input + seq input + both
@@ -88,10 +88,10 @@ only see the in-DRAM-overhead regime, never the cliff.
 
 ```bash
 python3 ChunkSequence/bench/plot_delayed_scale.py     # needs matplotlib
-# -> results/delayed_scale.png : two throughput panels (y = effective input GB/s,
-#    log-log base 2), left map|map|reduce (read-bound), right force(map|map)
-#    (write-bound); each shows in-mem (stops at the cliff), chunk-delayed
-#    (~raw-read ceiling), and chunk-eager.
+# -> results/delayed_scale.png : two runtime panels (y = operation time in seconds,
+#    log-log base 2, y ticks labelled as 2^k), left map|map|reduce (read-bound),
+#    right force(map|map) (write-bound); each shows in-mem (stops at the cliff),
+#    chunk-delayed, chunk-eager, and the raw-read ceiling.
 ```
 
 The in-mem-vs-chunk gap measures the externalization/engineering tax (both fuse — same

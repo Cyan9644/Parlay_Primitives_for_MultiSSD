@@ -16,6 +16,7 @@ Requires matplotlib (not bundled on this box):
     pip install matplotlib      # or add python3Packages.matplotlib to your Nix env
 """
 import csv
+import math
 import os
 import sys
 
@@ -23,6 +24,7 @@ try:
     import matplotlib
     matplotlib.use("Agg")  # headless: write a file, no display needed
     import matplotlib.pyplot as plt
+    import matplotlib.ticker as ticker
 except ImportError:
     sys.stderr.write(
         "error: matplotlib is required to plot.\n"
@@ -33,6 +35,11 @@ except ImportError:
     sys.exit(1)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _pow2_fmt(val, _):
+    n = round(math.log2(val))
+    return f'$2^{{{n}}}$'
 
 
 def main():
@@ -65,6 +72,7 @@ def main():
             ax.plot(n, ys, style, label=label)
         ax.set_xscale("log", base=2)
         ax.set_yscale("log", base=2)
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(_pow2_fmt))
         ax.set_xlabel("n (elements)")
         ax.set_ylabel("operation time (s)")
         ax.set_title(title)
