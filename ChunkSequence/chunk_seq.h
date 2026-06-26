@@ -17,8 +17,14 @@
 #include "utils/logger.h"
 #include "utils/unordered_file_writer.h"
 
-constexpr size_t CHUNK_SIZE = 1024 * 1024 * 4; // 4MB, this is the number of bytes not number of indices
-constexpr size_t ELEMS_PER_CHUNK = CHUNK_SIZE / sizeof(uint64_t); // 524,288 elements per chunk
+#ifdef CHUNK_SIZE_BYTES
+static_assert(CHUNK_SIZE_BYTES % 4096 == 0,
+    "CHUNK_SIZE_BYTES must be a multiple of O_DIRECT_MULTIPLE (4096)");
+constexpr size_t CHUNK_SIZE = CHUNK_SIZE_BYTES;
+#else
+constexpr size_t CHUNK_SIZE = 1024 * 1024 * 4; // 4 MB default
+#endif
+constexpr size_t ELEMS_PER_CHUNK = CHUNK_SIZE / sizeof(uint64_t);
 
 struct chunk {
     std::string filename; // the file that this chunk lives in

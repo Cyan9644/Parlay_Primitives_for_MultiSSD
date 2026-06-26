@@ -170,6 +170,12 @@ $(BINDIR)/raytracer: ChunkSequence/examples/raytracer.cpp $(UTIL_OBJS)
 $(BINDIR)/pathTracer: ChunkSequence/examples/path_tracer.cpp $(UTIL_OBJS)
 	$(LINK)
 
+# Chunk-size sensitivity benchmark: one binary per chunk size, compiled with
+# -DCHUNK_SIZE_BYTES=N so the chunk layout is baked in at compile time.
+# Usage: make bazel-bin/bwChunkSize_1048576   (for 1 MB chunks, etc.)
+$(BINDIR)/bwChunkSize_%: ChunkSequence/bench/chunk_size_compare.cpp $(UTIL_OBJS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -DCHUNK_SIZE_BYTES=$* $^ -o $@ $(LDFLAGS) -Wl,--start-group $(ABSL_LIBS) -Wl,--end-group
+
 # ── cleanup ────────────────────────────────────────────────────────────────────
 
 clean:
