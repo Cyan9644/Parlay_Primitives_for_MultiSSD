@@ -165,30 +165,29 @@ int main(int argc, char* argv[]) {
     // identity: output[i] == input[i] == global_index
     all_pass &= run_test<T>("identity      x -> x",
                             input, "map_id", ELEMS_PER_CHUNK,
-                            std::function<T(T)>([](T x) -> T { return x; }));
+                            [](T x) -> T { return x; });
 
     // increment: output[i] == global_index + 1
     all_pass &= run_test<T>("increment     x -> x+1",
                             input, "map_incr", ELEMS_PER_CHUNK,
-                            std::function<T(T)>([](T x) -> T { return x + 1; }));
+                            [](T x) -> T { return x + 1; });
 
     // double: output[i] == global_index * 2
     all_pass &= run_test<T>("double        x -> x*2",
                             input, "map_double", ELEMS_PER_CHUNK,
-                            std::function<T(T)>([](T x) -> T { return x * 2; }));
+                            [](T x) -> T { return x * 2; });
 
     // complement: output[i] == ~global_index
     all_pass &= run_test<T>("complement    x -> ~x",
                             input, "map_compl", ELEMS_PER_CHUNK,
-                            std::function<T(T)>([](T x) -> T { return ~x; }));
+                            [](T x) -> T { return ~x; });
 
     // ── type-changing case (T=uint64_t, R=uint32_t) ───────────────────────────
     // Tests the non-in-place allocation path; for n < 2^32 the low 32 bits
     // are lossless.
     all_pass &= run_test<uint32_t>("narrow u64->u32 x -> uint32_t(x)",
                                    input, "map_narrow", ELEMS_PER_CHUNK,
-                                   std::function<uint32_t(T)>(
-                                       [](T x) -> uint32_t { return (uint32_t)x; }));
+                                   [](T x) -> uint32_t { return (uint32_t)x; });
 
     std::cout << "\n" << (all_pass ? "ALL PASS" : "SOME FAILED") << "\n";
     return all_pass ? 0 : 1;

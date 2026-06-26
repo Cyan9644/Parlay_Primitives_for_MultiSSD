@@ -6,7 +6,6 @@
 #include <map>
 #include <random>
 #include <algorithm>
-#include <functional>
 #include <cstring>
 #include <cstdlib>
 #include <fcntl.h>
@@ -84,9 +83,8 @@ namespace ChunkSequenceOps {
  * Writes go through UnorderedFileWriter (io_uring) into pre-fallocated files.
  * A queue of 64 in-flight buffers (256 MB) caps DRAM usage.
  */
-template<typename T>
-chunk_seq tabulate(size_t n, const std::string& result_prefix,
-                   std::function<T(size_t)> f) {
+template<typename T = uint64_t, typename F>
+chunk_seq tabulate(size_t n, const std::string& result_prefix, F f) {
     static_assert(CHUNK_SIZE % sizeof(T) == 0,
         "sizeof(T) must divide CHUNK_SIZE for O_DIRECT alignment");
     const size_t ept = CHUNK_SIZE / sizeof(T);
@@ -186,8 +184,7 @@ chunk_seq tabulate(size_t n, const std::string& result_prefix,
 }
 
 chunk_seq perm(size_t n) {
-    return tabulate<uint64_t>(n, "perm",
-        std::function<uint64_t(size_t)>([](size_t i) { return (uint64_t)i; }));
+    return tabulate<uint64_t>(n, "perm", [](size_t i) { return (uint64_t)i; });
 }
 
 } // namespace ChunkSequenceOps

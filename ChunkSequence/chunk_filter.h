@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
 #include <random>
 #include <string>
 #include <vector>
@@ -50,12 +49,13 @@ static constexpr size_t FILTER_BATCH_SIZE = 128;
  * The returned chunk_seq preserves the index-ordered invariant
  * (out.chunks[i].index == i).
  *
- * @tparam T  Element type (must match the type stored in the chunk_seq).
+ * @tparam T     Element type (must match the type stored in the chunk_seq).
+ * @tparam F     Predicate type; must be callable as bool(T).
  */
-template<typename T>
+template<typename T, typename F>
 chunk_seq ChunkFilter(const chunk_seq& seq,
                       const std::string& result_prefix,
-                      std::function<bool(T)> pred) {
+                      F pred) {
     const size_t n_in      = seq.chunks.size();
     if (n_in == 0) return {};
 

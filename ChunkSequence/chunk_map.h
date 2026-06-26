@@ -1,7 +1,6 @@
 #ifndef CHUNK_MAP_H
 #define CHUNK_MAP_H
 
-#include <functional>
 #include <memory>
 #include <random>
 #include <string>
@@ -42,9 +41,8 @@ namespace ChunkSequenceOps {
  * @tparam T  Input element type.
  * @tparam R  Output element type (defaults to T).
  */
-template<typename T, typename R = T>
-chunk_seq ChunkMap(const chunk_seq& seq, const std::string& result_prefix,
-                   std::function<R(T)> f) {
+template<typename T, typename R = T, typename F>
+chunk_seq ChunkMap(const chunk_seq& seq, const std::string& result_prefix, F f) {
     const size_t n_chunks  = seq.chunks.size();
     const size_t num_drives = GetSSDList().size();
 

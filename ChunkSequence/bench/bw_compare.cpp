@@ -161,7 +161,7 @@ int main(int argc, char* argv[]) {
     {
         auto t0 = Clock::now();
         ChunkSequenceOps::ChunkMap<uint64_t>(cseq, "bw_chunk_map",
-                           std::function<uint64_t(uint64_t)>([](uint64_t x) { return x + 1; }));
+                           [](uint64_t x) { return x + 1; });
         chunk_map_s = elapsed(t0);
         print_row("ChunkMap", cseq_total, chunk_map_s);
     }

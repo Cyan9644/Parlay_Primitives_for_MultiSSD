@@ -267,8 +267,8 @@ Key differences from `UnorderedFileReader`:
 ### `ChunkSequenceOps::tabulate`  (`chunk_seq.h`)
 
 ```cpp
-chunk_seq ChunkSequenceOps::tabulate(size_t n, const std::string& result_prefix,
-                                     std::function<uint64_t(size_t)> f);
+template <typename T = uint64_t, typename F>
+chunk_seq ChunkSequenceOps::tabulate(size_t n, const std::string& result_prefix, F f);
 ```
 
 General constructor: fills position `i` with `f(i)` for `i` in `[0, n)`, writing `ELEMS_PER_CHUNK` elements per chunk.
@@ -287,12 +287,38 @@ chunk_seq ChunkSequenceOps::perm(size_t n);
 
 Thin wrapper: `tabulate(n, "perm", [](size_t i) { return (uint64_t)i; })`.
 
+### Passing callables to eager primitives
+
+`tabulate`, `ChunkMap`, and `ChunkFilter` accept any callable (`F`) — pass lambdas directly, no `std::function` wrapper needed or wanted (wrapping defeats inlining):
+
+```cpp
+// Good — lambda passed directly; compiler inlines the call
+ChunkSequenceOps::ChunkMap<uint64_t>(seq, "out", [](uint64_t x) { return x + 1; });
+
+// Avoid — std::function wrapping adds heap allocation and indirect call
+const std::function<uint64_t(uint64_t)> f = [](uint64_t x) { return x + 1; };
+ChunkSequenceOps::ChunkMap<uint64_t>(seq, "out", f);
+```
+
+**Type annotation rules** — because `F` is an unconstrained template parameter, the compiler cannot infer `T` or `R` from the lambda's argument/return types.  You must supply them explicitly:
+
+| situation | what to write |
+|---|---|
+| Same-type map (`T == R`) | `ChunkMap<uint64_t>(seq, "out", f)` — `T` explicit, `R` defaults to `T` |
+| Type-changing map | `ChunkMap<uint64_t, uint32_t>(seq, "out", f)` — both `T` and `R` explicit; omitting `R` silently truncates |
+| `tabulate` with default `uint64_t` | `tabulate(n, "p", f)` — `T` defaults to `uint64_t` |
+| `tabulate` with non-default type | `tabulate<float>(n, "p", f)` — must be explicit; a lambda returning `float` does **not** set `T` |
+| `ChunkFilter` | `ChunkFilter<uint64_t>(seq, "out", pred)` — `T` always explicit |
+
+The `delayed` primitives (`chunk_delayed.h`) follow the same pattern and have always used unconstrained template parameters — these rules apply there too.
+
+`ChunkReduce` and `ChunkScan` are unaffected; they use a templated `Monoid` type and have no callable parameter.
+
 ### `ChunkMap`  (`chunk_map.h`)
 
 ```cpp
-template <typename T, typename R = T>
-chunk_seq ChunkSequenceOps::ChunkMap(const chunk_seq& seq, const std::string& result_prefix,
-                                     std::function<R(T)> f);
+template <typename T, typename R = T, typename F>
+chunk_seq ChunkSequenceOps::ChunkMap(const chunk_seq& seq, const std::string& result_prefix, F f);
 ```
 
 Maps `f` over every element, writing the results out with the same **one-file-per-drive** layout as `tabulate`: output chunks are randomly assigned to the `GetSSDList()` drives (balls-in-bins) and packed at `CHUNK_SIZE`-aligned offsets within each drive's file (`result_prefix + drive_index`), so a single file grows to hold many more chunks than there are drives. Writes go through `UnorderedFileWriter` (io_uring).  Returns an index-ordered `chunk_seq` describing the outputs so results are directly chainable.  In-place optimization applies when `T == R` (the reader buffer is transformed and handed straight to the writer).
@@ -309,9 +335,8 @@ Same monoid protocol as `Reduce`.
 ### `ChunkFilter`  (`chunk_filter.h`)
 
 ```cpp
-template <typename T>
-chunk_seq ChunkSequenceOps::ChunkFilter(const chunk_seq& seq, const std::string& result_prefix,
-                                        std::function<bool(T)> pred);
+template <typename T, typename F>
+chunk_seq ChunkSequenceOps::ChunkFilter(const chunk_seq& seq, const std::string& result_prefix, F pred);
 ```
 
 Filters elements by `pred`, writing survivors as a **tightly packed** chunk_seq.  Unlike `ChunkMap`, the output size is unknown upfront, so output files are not pre-fallocated — they grow via `pwrite` at `CHUNK_SIZE`-aligned offsets.  All output chunks except the final one have `used == CHUNK_SIZE` (dense packing).

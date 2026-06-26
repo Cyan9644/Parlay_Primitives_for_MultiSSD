@@ -72,7 +72,7 @@ test: $(TEST_BINARIES)
 
 # ── dependency fetching ────────────────────────────────────────────────────────
 
-deps: deps/parlaylib deps/abseil-cpp/install
+deps: deps/parlaylib deps/abseil-cpp/install deps/stb/stb_image.h
 
 deps/parlaylib:
 	mkdir -p deps
@@ -80,6 +80,11 @@ deps/parlaylib:
 	cd deps/parlaylib-full && git checkout 6b4a4cdbfeb3c481608a42db0230eb6ebb87bf8d
 	mv deps/parlaylib-full/include deps/parlaylib
 	rm -rf deps/parlaylib-full
+
+deps/stb/stb_image.h:
+	mkdir -p deps/stb
+	curl -fsSL https://raw.githubusercontent.com/nothings/stb/f75e8d1cad7d90d72ef7a4661f1b994ef78b4e31/stb_image.h \
+	    -o deps/stb/stb_image.h
 
 deps/abseil-cpp/install:
 	mkdir -p deps

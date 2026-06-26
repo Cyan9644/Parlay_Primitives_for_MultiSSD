@@ -29,7 +29,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <chrono>
-#include <functional>
 #include <string>
 #include <unistd.h>
 
@@ -83,8 +82,6 @@ int main(int argc, char* argv[]) {
 
     auto add1 = [](uint64_t x) { return x + 1; };
     auto mul2 = [](uint64_t x) { return 2 * x; };
-    const std::function<uint64_t(uint64_t)> add1f = add1;   // ChunkMap takes std::function
-    const std::function<uint64_t(uint64_t)> mul2f = mul2;
     const parlay::plus<uint64_t> psum{};                    // in-memory monoid
 
     // ── RAM budget for the in-memory baseline ────────────────────────────────
@@ -137,7 +134,7 @@ int main(int argc, char* argv[]) {
         auto t0 = Clock::now();
         e_mr = 0;
         uint64_t r = ChunkSequenceOps::ChunkReduce<uint64_t>(
-            ChunkSequenceOps::ChunkMap<uint64_t>(cseq, "bw_dl_m", add1f), SumMonoid{});
+            ChunkSequenceOps::ChunkMap<uint64_t>(cseq, "bw_dl_m", add1), SumMonoid{});
         e_mr = elapsed(t0);
         cleanup_prefix("bw_dl_m");
         uint64_t mr_e = r;
@@ -165,8 +162,8 @@ int main(int argc, char* argv[]) {
         auto t0 = Clock::now();
         mmr_e = ChunkSequenceOps::ChunkReduce<uint64_t>(
             ChunkSequenceOps::ChunkMap<uint64_t>(
-                ChunkSequenceOps::ChunkMap<uint64_t>(cseq, "bw_dl_m1", add1f),
-                "bw_dl_m2", mul2f),
+                ChunkSequenceOps::ChunkMap<uint64_t>(cseq, "bw_dl_m1", add1),
+                "bw_dl_m2", mul2),
             SumMonoid{});
         e_mmr = elapsed(t0);
         cleanup_prefix("bw_dl_m1"); cleanup_prefix("bw_dl_m2");
@@ -193,8 +190,8 @@ int main(int argc, char* argv[]) {
     std::cout << "\n--- force(map(x+1) | map(2x)) — write-terminated ---\n";
     {
         auto t0 = Clock::now();
-        chunk_seq m1 = ChunkSequenceOps::ChunkMap<uint64_t>(cseq, "bw_dl_g1", add1f);
-        chunk_seq m2 = ChunkSequenceOps::ChunkMap<uint64_t>(m1, "bw_dl_g2", mul2f);
+        chunk_seq m1 = ChunkSequenceOps::ChunkMap<uint64_t>(cseq, "bw_dl_g1", add1);
+        chunk_seq m2 = ChunkSequenceOps::ChunkMap<uint64_t>(m1, "bw_dl_g2", mul2);
         e_f = elapsed(t0);
         uint64_t f_e = ChunkSequenceOps::ChunkReduce<uint64_t>(m2, SumMonoid{});  // verify (untimed)
         cleanup_prefix("bw_dl_g1"); cleanup_prefix("bw_dl_g2");
