@@ -63,6 +63,41 @@ small enough to fit; the driver clears `/mnt/ssd*/` between sizes.
 
 Nix environments are detected automatically; liburing include/lib paths are picked up from `NIX_CFLAGS_COMPILE` / `NIX_LDFLAGS`.
 
+### Scaling harness — in-memory vs chunk-eager vs chunk-delayed
+
+`ChunkSequence/bench/delayed_compare.cpp` (→ `bwDelayed`) times the **same** pipeline
+three ways at one size — in-memory `parlay::delayed` (the DRAM "speed-of-light"
+line), chunk-eager (round-trips every intermediate through SSD), and chunk-delayed
+(fused) — plus a raw-read ceiling (`ChunkReduce`), and checks all substrates agree
+(cross-substrate differential correctness; exits non-zero on mismatch).  Pipelines:
+`map|reduce`, `map|map|reduce`, and the write-terminated `force(map|map)`.
+
+```bash
+make bazel-bin/bwDelayed
+./bazel-bin/bwDelayed <n>            # one size: per-substrate rows + CSV line + agree=1
+# sweep n = 2^min .. 2^max (intended for a real multi-SSD box that crosses the DRAM boundary):
+ChunkSequence/bench/bench_delayed_scale.sh [min_exp] [max_exp] [reps]   # defaults 24 32 1
+# -> ChunkSequence/bench/results/delayed_scale.csv
+```
+
+The in-memory baseline is skipped once the input exceeds a RAM budget (default ½
+physical RAM; override with env `DELAYED_INMEM_BUDGET_BYTES`).  Past that **cliff**
+its CSV columns blank out and the plotted line stops — that boundary is the point of
+the sweep, so it needs storage ≫ RAM.  On a tmpfs dev box (the "SSDs" are RAM) you
+only see the in-DRAM-overhead regime, never the cliff.
+
+```bash
+python3 ChunkSequence/bench/plot_delayed_scale.py     # needs matplotlib
+# -> results/delayed_scale.png : two throughput panels (y = effective input GB/s,
+#    log-log base 2), left map|map|reduce (read-bound), right force(map|map)
+#    (write-bound); each shows in-mem (stops at the cliff), chunk-delayed
+#    (~raw-read ceiling), and chunk-eager.
+```
+
+The in-mem-vs-chunk gap measures the externalization/engineering tax (both fuse — same
+technique, different substrate); the eager-vs-delayed gap on the same plot isolates the
+fusion win; chunk-delayed-vs-raw-read shows I/O efficiency.
+
 ## Repository layout
 
 ```
