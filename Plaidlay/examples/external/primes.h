@@ -12,7 +12,6 @@
 #include <parlay/primitives.h>
 #include <parlay/sequence.h>
 #include "ExternalBoolean.h"
-#include "externalSeq.h"
 
 
 inline parlay::sequence<size_t> base_sieve(long m) {
@@ -28,6 +27,7 @@ inline parlay::sequence<size_t> base_sieve(long m) {
     for (long i = 2; i <= m; i++) {
         if (is_prime[i]) out.push_back(i);
     }
+
     return out;
 }
 
@@ -35,6 +35,7 @@ inline parlay::sequence<size_t> base_sieve(long m) {
 External_Sequence primes(size_t n, const std::vector<std::string> &new_filenames, const std::vector<std::string> &out_files) {
 
   if (n < 2) return External_Sequence(0);
+
 
   long sqrt_n = (long) std::sqrt((double) n);
   while ((size_t)(sqrt_n + 1) * (size_t)(sqrt_n + 1) <= n) sqrt_n++;

@@ -5,6 +5,8 @@
 
 ./bazel-bin/externalSeqMain
 
+./bazel-bin/primesScaling
+
 
 ./physical_ssd.sh
 
