@@ -41,11 +41,11 @@ BINARIES := $(BINDIR)/speed_test $(BINDIR)/io_uring_test $(BINDIR)/sample_sort \
             $(BINDIR)/permutation $(BINDIR)/sequence  $(BINDIR)/plaidlaymain $(BINDIR)/externalSeqMain \
             $(BINDIR)/scanVerify $(BINDIR)/chunkSeqMain $(BINDIR)/permTest $(BINDIR)/mapTest \
             $(BINDIR)/reduceTest $(BINDIR)/filterTest $(BINDIR)/scanTest $(BINDIR)/combinedTest \
-            $(BINDIR)/delayedTest $(BINDIR)/bwCompare $(BINDIR)/bwDelayed \
-            $(BINDIR)/raytracer $(BINDIR)/pathTracer
+            $(BINDIR)/delayedTest $(BINDIR)/flatTabulateTest $(BINDIR)/bwCompare $(BINDIR)/bwDelayed \
+            $(BINDIR)/raytracer $(BINDIR)/pathTracer $(BINDIR)/primes
 
 # ChunkSequence correctness tests (each exits 0 on PASS, non-zero on FAIL).
-TEST_BINARIES := $(BINDIR)/permTest $(BINDIR)/mapTest $(BINDIR)/reduceTest $(BINDIR)/filterTest $(BINDIR)/scanTest $(BINDIR)/combinedTest $(BINDIR)/delayedTest
+TEST_BINARIES := $(BINDIR)/permTest $(BINDIR)/mapTest $(BINDIR)/reduceTest $(BINDIR)/filterTest $(BINDIR)/scanTest $(BINDIR)/combinedTest $(BINDIR)/delayedTest $(BINDIR)/flatTabulateTest
 
 LINK = $(CXX) $(CXXFLAGS) $(INCLUDES) $^ -o $@ $(LDFLAGS) -Wl,--start-group $(ABSL_LIBS) -Wl,--end-group
 
@@ -168,6 +168,12 @@ $(BINDIR)/raytracer: ChunkSequence/examples/raytracer.cpp $(UTIL_OBJS)
 	$(LINK)
 
 $(BINDIR)/pathTracer: ChunkSequence/examples/path_tracer.cpp $(UTIL_OBJS)
+	$(LINK)
+
+$(BINDIR)/primes: ChunkSequence/examples/primes.cpp $(UTIL_OBJS)
+	$(LINK)
+
+$(BINDIR)/flatTabulateTest: ChunkSequence/tests/flat_tabulate_test.cpp $(UTIL_OBJS)
 	$(LINK)
 
 # Chunk-size sensitivity benchmark: one binary per chunk size, compiled with
