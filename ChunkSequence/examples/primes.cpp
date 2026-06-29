@@ -75,11 +75,12 @@ chunk_seq chunk_primes(size_t n, const std::string& result_prefix) {
 
 int main(int argc, char* argv[]) {
     size_t n = (argc > 1) ? std::stoull(argv[1]) : 1'000'000;
+    const std::string out_path = (argc > 2) ? argv[2] : "primes_output.bin";
 
-    chunk_seq primes = chunk_primes(n, "primes");
+    chunk_seq primes_seq = chunk_primes(n, "primes");
 
     size_t count = 0;
-    for (const auto& c : primes.chunks)
+    for (const auto& c : primes_seq.chunks)
         count += c.used / sizeof(uint64_t);
 
     std::cout << "pi(" << n << ") = " << count << "\n";
@@ -87,7 +88,7 @@ int main(int argc, char* argv[]) {
     if (count == 0) return 0;
 
     // Read the last output chunk and print the final few primes.
-    const chunk& last = primes.chunks.back();
+    const chunk& last = primes_seq.chunks.back();
     const size_t last_n = last.used / sizeof(uint64_t);
     void* buf = aligned_alloc(O_DIRECT_MEMORY_ALIGNMENT, CHUNK_SIZE);
     CHECK(buf != nullptr);
@@ -104,5 +105,10 @@ int main(int argc, char* argv[]) {
     std::cout << "\n";
 
     free(buf);
+
+    // Write the full prime sequence as packed uint64_t to out_path.
+    primes_seq.consolidate(out_path);
+    std::cout << "written to " << out_path << "\n";
+
     return 0;
 }

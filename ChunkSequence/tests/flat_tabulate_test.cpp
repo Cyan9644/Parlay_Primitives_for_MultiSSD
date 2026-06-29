@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <set>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 
@@ -354,6 +355,86 @@ static bool test_chunk_boundary() {
     return pass;
 }
 
+// Test 6: consolidate writes packed raw uint64_t with no padding or header.
+// Runs chunk_primes(1000), consolidates to a temp file, reads it back, and
+// checks element-by-element against in_mem_primes(1000).
+static bool test_consolidate_output() {
+    std::cout << "test_consolidate_output\n" << std::flush;
+    const size_t n = 1000;
+    const std::string prefix = "ft_consol_primes";
+    const std::string out_path = "ft_consol_primes_output.bin";
+
+    long sqrt_n = (long)std::sqrt((double)n);
+    while ((long long)(sqrt_n + 1) * (sqrt_n + 1) <= (long long)n) sqrt_n++;
+    parlay::sequence<long> small = in_mem_primes(sqrt_n);
+
+    chunk_seq result = ChunkSequenceOps::ChunkFlatTabulate<uint64_t>(n + 1, prefix,
+        [&](size_t start, size_t end) {
+            std::vector<bool> flags(end - start, true);
+            for (long p : small) {
+                size_t first = std::max((size_t)(2 * p), (((start - 1) / p) + 1) * p);
+                for (size_t k = first; k < end; k += (size_t)p)
+                    flags[k - start] = false;
+            }
+            parlay::sequence<uint64_t> out;
+            size_t lo = (start < 2) ? 2 : start;
+            for (size_t i = lo; i < end; i++)
+                if (flags[i - start]) out.push_back((uint64_t)i);
+            return out;
+        });
+
+    result.consolidate(out_path);
+
+    bool pass = true;
+    parlay::sequence<long> ref = in_mem_primes((long)n);
+
+    // Verify file size: must be exactly ref.size() * 8 bytes, no padding or header.
+    struct stat st;
+    if (stat(out_path.c_str(), &st) != 0) {
+        std::cout << "  FAIL: could not stat " << out_path << "\n";
+        pass = false;
+    } else {
+        const size_t expected_bytes = ref.size() * sizeof(uint64_t);
+        if ((size_t)st.st_size != expected_bytes) {
+            std::cout << "  FAIL file size: got=" << st.st_size
+                      << " expected=" << expected_bytes << "\n";
+            pass = false;
+        } else {
+            std::cout << "  file size OK (" << expected_bytes << " bytes)\n";
+        }
+    }
+
+    // Read back and compare element-by-element.
+    int fd = open(out_path.c_str(), O_RDONLY);
+    if (fd < 0) {
+        std::cout << "  FAIL open: " << strerror(errno) << "\n";
+        pass = false;
+    } else {
+        std::vector<uint64_t> got_vals(ref.size());
+        ssize_t bytes = read(fd, got_vals.data(), ref.size() * sizeof(uint64_t));
+        close(fd);
+        if (bytes != (ssize_t)(ref.size() * sizeof(uint64_t))) {
+            std::cout << "  FAIL short read: got=" << bytes << "\n";
+            pass = false;
+        } else {
+            bool ok = true;
+            for (size_t i = 0; i < ref.size() && ok; i++) {
+                if (got_vals[i] != (uint64_t)ref[i]) {
+                    std::cout << "  FAIL element " << i
+                              << ": got=" << got_vals[i] << " expected=" << ref[i] << "\n";
+                    ok = pass = false;
+                }
+            }
+            if (ok) std::cout << "  values OK (" << ref.size() << " primes)\n";
+        }
+    }
+
+    std::cout << "  => " << (pass ? "PASS" : "FAIL") << "\n\n";
+    unlink(out_path.c_str());
+    cleanup_prefix(prefix);
+    return pass;
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 
 int main(int argc, char* argv[]) {
@@ -374,6 +455,7 @@ int main(int argc, char* argv[]) {
     all_pass &= test_primes_count(10'000'000);             // pi = 664579
 
     all_pass &= test_chunk_boundary();
+    all_pass &= test_consolidate_output();
 
     // Optional large-n check from command line (count only, no order check).
     if (argc > 1) {
