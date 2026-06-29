@@ -43,8 +43,13 @@ External_Sequence primes(size_t n, const std::vector<std::string> &new_filenames
   parlay::sequence<size_t> base_primes = base_sieve(sqrt_n);
 
   constexpr size_t buffer_size_bytes = 4 << 20;
-  constexpr size_t flags_per_chunk = buffer_size_bytes / sizeof(bool);   
-  constexpr size_t buffer_size = buffer_size_bytes / sizeof(size_t);     
+  constexpr size_t flags_per_chunk = buffer_size_bytes / sizeof(bool);
+  constexpr size_t buffer_size = buffer_size_bytes / sizeof(size_t);
+  // The sieve below assumes each chunk starts on an even number, so flag index
+  // parity matches integer parity (even integers, the non-primes, sit at even
+  // indices). chunk_start = index * flags_per_chunk, so this holds iff the chunk
+  // size is even. Guard it: a future tweak to buffer_size_bytes must keep it so.
+  static_assert(flags_per_chunk % 2 == 0, "chunk size must be even for parity-skipping");
   size_t num_chunks = (n + 1 + flags_per_chunk - 1) / flags_per_chunk;
 
   External_Sequence seq(num_chunks);
@@ -102,9 +107,20 @@ External_Sequence primes(size_t n, const std::vector<std::string> &new_filenames
     size_t chunk_end = chunk_start + size;
 
     for (size_t p : base_primes) {
-        size_t first = std::max<size_t>(p * p, ((chunk_start + p - 1) / p) * p);
-        for (size_t m = first; m < chunk_end; m += p) {
-            ptr[m - chunk_start] = false;
+        // First multiple of p in this chunk, never below p*p (smaller multiples
+        // were already crossed off by smaller primes).
+        size_t start = std::max<size_t>(p * p, ((chunk_start + p - 1) / p) * p);
+        size_t step = p;
+        if (p != 2) {
+            // Even multiples of an odd prime are even numbers, already marked by
+            // p == 2. Skip them: jump to the first odd multiple and stride 2*p.
+            if ((start & 1) == 0) start += p;   // start is odd*p -> still a multiple
+            step = 2 * p;
+        }
+        if (start >= chunk_end) continue;
+        // Strength-reduce to a flag index so the inner loop is a plain stride.
+        for (size_t k = start - chunk_start; k < size; k += step) {
+            ptr[k] = false;
         }
     }
     if (chunk_start == 0) {
@@ -114,10 +130,14 @@ External_Sequence primes(size_t n, const std::vector<std::string> &new_filenames
 
     size_t* out = buffer[i];
     size_t produced = 0;
-    for (size_t k = 0; k < size; k++) {
+    // chunk_start is even (see static_assert), so even indices hold even integers,
+    // which are all composite except 2. Emit 2 explicitly (first chunk only) and
+    // then scan odd indices only, halving the loads over the flag buffer.
+    if (chunk_start == 0 && size > 2 && ptr[2]) out[produced++] = 2;
+    for (size_t k = 1; k < size; k += 2) {
         if (ptr[k]) out[produced++] = chunk_start + k;
     }
-    reader.allocator.Free(ptr);  
+    reader.allocator.Free(ptr);
 
     chunk_header chunked;
     chunked.index = index;                       
