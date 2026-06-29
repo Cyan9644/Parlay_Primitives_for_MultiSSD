@@ -14,13 +14,23 @@ Outputs (written next to this script by default):
 
 In-memory is drawn in yellow, the external algorithm in blue.
 
+Data collection and plotting are decoupled so the benchmark can run on a remote
+machine that has no matplotlib: the sweep always writes the CSV, and plotting is
+attempted only as a best-effort final step (skipped with a hint if matplotlib is
+missing). Copy the CSV to a machine that has matplotlib and re-render with
+`--plot-only`.
+
 Usage:
     python3 plot_primes_benchmark.py                 # full 2**30 .. 2**40 sweep
     python3 plot_primes_benchmark.py --min-exp 28 --max-exp 34 --repeats 3
+    python3 plot_primes_benchmark.py --no-plot       # data only (no matplotlib)
+    python3 plot_primes_benchmark.py --plot-only \
+        --csv primes_benchmark_results.csv           # plot a CSV from elsewhere
 """
 
 import argparse
 import csv
+import json
 import os
 import subprocess
 import sys
@@ -110,6 +120,29 @@ def write_csv(path, exponents, results):
     print(f"wrote {path}")
 
 
+def write_json(path, exponents, results):
+    """Self-contained, trivially reloadable form of the sweep results. OOM /
+    timeout entries (None) serialize as JSON null."""
+    payload = {"exponents": list(exponents), "results": results}
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+    print(f"wrote {path}")
+
+
+def read_json(path):
+    """Inverse of write_json. Returns (exponents, results) in the same shape the
+    sweep produces: results[variant] is a list aligned with exponents, each entry
+    a (seconds, rss_kb) tuple or None."""
+    with open(path) as f:
+        payload = json.load(f)
+    exponents = payload["exponents"]
+    results = {
+        v: [tuple(r) if r is not None else None for r in entries]
+        for v, entries in payload["results"].items()
+    }
+    return exponents, results
+
+
 def plot(path, exponents, results):
     import matplotlib
     matplotlib.use("Agg")  # headless: just write a file
@@ -169,18 +202,38 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--min-exp", type=int, default=30, help="smallest size = 2**min_exp")
-    ap.add_argument("--max-exp", type=int, default=40, help="largest size = 2**max_exp")
+    ap.add_argument("--max-exp", type=int, default=36, help="largest size = 2**max_exp")
     ap.add_argument("--repeats", type=int, default=1, help="timed repeats per point (keeps best)")
     ap.add_argument("--timeout", type=float, default=3600.0, help="per-run timeout in seconds")
     ap.add_argument("--csv", default=os.path.join(SCRIPT_DIR, "primes_benchmark_results.csv"))
+    ap.add_argument("--json", default=os.path.join(SCRIPT_DIR, "primes_benchmark_results.json"))
     ap.add_argument("--png", default=os.path.join(SCRIPT_DIR, "primes_benchmark.png"))
+    ap.add_argument("--no-plot", action="store_true",
+                    help="skip plotting (e.g. on a remote machine without matplotlib)")
+    ap.add_argument("--plot-only", action="store_true",
+                    help="skip the sweep; render the plot from an existing --json data file")
     args = ap.parse_args()
+
+    if args.plot_only:
+        exponents, results = read_json(args.json)
+        plot(args.png, exponents, results)
+        return
 
     exponents = list(range(args.min_exp, args.max_exp + 1))
     ensure_binary()
     results = sweep(exponents, args.repeats, args.timeout)
     write_csv(args.csv, exponents, results)
-    plot(args.png, exponents, results)
+    write_json(args.json, exponents, results)
+
+    if args.no_plot:
+        return
+    try:
+        plot(args.png, exponents, results)
+    except ImportError:
+        print(f"matplotlib not available; data written to {args.json}.\n"
+              f"Re-render on a machine with matplotlib via:\n"
+              f"  python3 {os.path.basename(__file__)} --plot-only "
+              f"--json {args.json} --png {args.png}", file=sys.stderr)
 
 
 if __name__ == "__main__":
