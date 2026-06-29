@@ -18,7 +18,7 @@ size_t get_index(chunk_header* chunk){
 
 
 
-std::vector<std::vector<chunk_header>>& getSeq(External_Sequence* seq){
+parlay::sequence<chunk_header>& getSeq(External_Sequence* seq){
     return seq->ordered_underlying_sequence;
 }
 

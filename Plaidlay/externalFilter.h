@@ -46,7 +46,7 @@ External_Sequence ExternalFilter(External_Sequence &seq, const std::function<boo
 
     External_Sequence sequence = External_Sequence(seq.size());
     // std::vector<chunk_header>* chunk_header_arr = &((std::vector<chunk_header>*)sequence.ordered_underlying_sequence);
-    std::vector<chunk_header>* chunk_header_arr = &sequence.ordered_underlying_sequence;
+    parlay::sequence<chunk_header>* chunk_header_arr = &sequence.ordered_underlying_sequence;
     constexpr size_t buffer_size_bytes = 4 << 20, buffer_size = buffer_size_bytes / sizeof(T);
     UnorderedChunkWriter<T> writer;
     UnorderedChunkWriterConfig wconfig;

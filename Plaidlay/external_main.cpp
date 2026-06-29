@@ -12,8 +12,17 @@
 //
 // The tests create and delete their own scratch files in the working directory.
 
-#include "externalSeq.h"
 #include "externalFilter.h"
+#include "ExternalIota.h"
+
+// The legacy randPerm/map/filter/scan demo (legacyDemo/mapThroughput, defined at
+// the bottom of this file) depends on externalSeq.h, which currently pulls in the
+// in-progress scan.h refactor and does not compile on its own. That demo is
+// reference-only and is not run by main(), so it is compiled out by default.
+// Define ENABLE_EXTERNAL_SEQ_DEMO to build it once the scan refactor lands.
+#ifdef ENABLE_EXTERNAL_SEQ_DEMO
+#include "externalSeq.h"
+#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -27,10 +36,12 @@
 #include <unordered_set>
 #include <vector>
 
+#ifdef ENABLE_EXTERNAL_SEQ_DEMO
 auto add = [](size_t a, size_t b) {return a + b;};
 
 void mapThroughput();
 void legacyDemo();
+#endif
 
 // ===========================================================================
 //  Correctness and memory tests for ExternalFilter (Plaidlay/externalFilter.h)
@@ -123,7 +134,7 @@ External_Sequence BuildInput(const std::string &prefix,
 // Read an output External_Sequence back into a flat vector, in index order.
 template<typename T>
 std::vector<T> ReadOutput(const External_Sequence &out) {
-    std::vector<chunk_header> headers = out.ordered_underlying_sequence;
+    parlay::sequence<chunk_header> headers = out.ordered_underlying_sequence;
     std::sort(headers.begin(), headers.end(),
               [](const chunk_header &a, const chunk_header &b) { return a.index < b.index; });
 
@@ -221,7 +232,7 @@ template<typename T>
 void CheckOutputInvariants(const External_Sequence &out, size_t num_input_chunks,
                            const std::vector<std::string> &out_names,
                            const std::string &name) {
-    const std::vector<chunk_header> &hs = out.ordered_underlying_sequence;
+    const parlay::sequence<chunk_header> &hs = out.ordered_underlying_sequence;
     std::unordered_set<std::string> allowed(out_names.begin(), out_names.end());
 
     bool ok = (hs.size() == num_input_chunks);
@@ -396,6 +407,269 @@ void TestMemoryBounded() {
     RemoveFiles(files);
 }
 
+// ===========================================================================
+//  Correctness and memory tests for ExternalIota (Plaidlay/ExternalIota.h)
+//
+//  ExternalIota(n, seq, filenames) materializes the logical sequence
+//  [0, 1, ..., n-1] onto disk as fixed-size 4 MiB chunks spread across the
+//  given files (one chunk per SSD slot per batch). The value at global element
+//  position g lives in chunk c = g / elems_per_chunk at offset g % elems_per_chunk,
+//  i.e. it is simply g. Each chunk's header carries its global chunk number in
+//  `index`, so sorting the output by `index` reproduces the iota in order. The
+//  final chunk is written as a full 4 MiB buffer but its header's `used` counts
+//  only the in-range elements; the trailing values past element n-1 are padding.
+//
+//  IMPORTANT CONTRACT: ExternalIota does NOT resize `seq` (the resize is
+//  currently commented out, ExternalIota.h:170). It writes headers into slots
+//  [0, num_chunks) and assumes the caller pre-sized `seq` to exactly
+//  num_chunks = ceil(n / elems_per_chunk). A larger `seq` would leave trailing
+//  default headers (index 0) that corrupt the final sort, so RunIota constructs
+//  `seq` at exactly that size (see IotaChunkCount).
+//
+//  These tests run ExternalIota, then read every chunk's `used` bytes back from
+//  disk at its recorded offset and confirm the reconstruction equals the iota,
+//  plus structural invariants on the headers and a no-leak memory check.
+// ===========================================================================
+
+// 16-byte element type to exercise a non-size_t T. ExternalIota fills each slot
+// with `buffer[i][k] = begin_val + k`, so T must be constructible from size_t;
+// the second word is derived from the value so the full sizeof(T) bytes are
+// checked for round-trip (not just the low 8).
+struct Iota16 {
+    uint64_t v;
+    uint64_t tag;
+    Iota16() = default;
+    Iota16(size_t x) : v((uint64_t) x), tag((uint64_t) x * 2654435761ull + 1) {}  // implicit
+    bool operator==(const Iota16 &o) const { return v == o.v && tag == o.tag; }
+};
+
+// Elements per chunk, mirroring ExternalIota's buffer_size = (4<<20)/sizeof(T).
+template<typename T>
+constexpr size_t IotaElemsPerChunk() { return (4u << 20) / sizeof(T); }
+
+// Number of chunks ExternalIota will produce for n elements (ceil division).
+template<typename T>
+size_t IotaChunkCount(size_t n) {
+    const size_t per = IotaElemsPerChunk<T>();
+    return (n + per - 1) / per;
+}
+
+// Run ExternalIota for n elements into a fresh set of output files, sizing the
+// input/output sequence to exactly num_chunks per the contract above.
+template<typename T>
+External_Sequence RunIota(const std::string &prefix, size_t n,
+                          std::vector<std::string> &out_files) {
+    std::vector<std::string> names = MakeOutputNames(prefix);  // fresh NUM_SSDS files
+    out_files.insert(out_files.end(), names.begin(), names.end());
+    External_Sequence seq(IotaChunkCount<T>(n));
+    return ExternalIota<T>(n, seq, names);
+}
+
+// Structural invariants for any successful iota, independent of the random SSD
+// placement: exactly num_chunks headers; indices are a permutation of
+// {0, ..., num_chunks-1}; each header's `used` is a whole number of T's equal to
+// that chunk's in-range element count (so the last chunk is partial when n is not
+// a multiple of elems_per_chunk); `used` never exceeds a 4 MiB block; filenames
+// come only from the provided set; offsets are O_DIRECT aligned; and no two
+// chunks' 4 MiB on-disk footprints overlap within a file.
+template<typename T>
+void CheckIotaInvariants(const External_Sequence &out, size_t n,
+                         const std::vector<std::string> &out_names,
+                         const std::string &name) {
+    const size_t per = IotaElemsPerChunk<T>();
+    const size_t num_chunks = IotaChunkCount<T>(n);
+    constexpr size_t kBlock = 4u << 20;
+
+    parlay::sequence<chunk_header> hs = out.ordered_underlying_sequence;
+    std::sort(hs.begin(), hs.end(),
+              [](const chunk_header &a, const chunk_header &b) { return a.index < b.index; });
+    std::unordered_set<std::string> allowed(out_names.begin(), out_names.end());
+
+    bool ok = (hs.size() == num_chunks);
+    size_t total_elems = 0;
+    std::vector<std::pair<std::string, size_t>> regions;  // (filename, begin_address)
+    for (size_t i = 0; i < hs.size(); i++) {
+        const chunk_header &h = hs[i];
+        if (h.index != i) ok = false;                                  // permutation 0..n-1
+        if (allowed.find(h.filename) == allowed.end()) ok = false;     // valid sink
+        if (h.used % sizeof(T) != 0) ok = false;                       // whole elements
+        if (h.used == 0) ok = false;                                   // every chunk has data
+        if (h.used > kBlock) ok = false;                               // within one block
+        if (h.begin_address % O_DIRECT_MEMORY_ALIGNMENT != 0) ok = false;
+        const size_t expect_valid = std::min(per, n - i * per);        // last chunk partial
+        if (h.used != expect_valid * sizeof(T)) ok = false;
+        total_elems += h.used / sizeof(T);
+        regions.push_back({h.filename, h.begin_address});
+    }
+    if (total_elems != n) ok = false;                                  // exactly n elements
+    std::sort(regions.begin(), regions.end());
+    for (size_t i = 1; i < regions.size(); i++) {
+        if (regions[i].first == regions[i - 1].first &&
+            regions[i].second < regions[i - 1].second + kBlock) {
+            ok = false;                                                // overlapping footprints
+        }
+    }
+    Check(ok, name + ": iota header invariants (index/used/size/filename/offset/no-overlap)");
+}
+
+// Read each chunk's `used` bytes back from disk at its recorded offset and verify
+// every element equals make(global_index). Streams one chunk at a time so host
+// memory stays bounded. Returns true iff all values match; sets total_out to the
+// number of elements seen.
+template<typename T, typename MakeFn>
+bool VerifyIotaData(const External_Sequence &out, MakeFn make, size_t &total_out) {
+    const size_t per = IotaElemsPerChunk<T>();
+    parlay::sequence<chunk_header> hs = out.ordered_underlying_sequence;
+    std::sort(hs.begin(), hs.end(),
+              [](const chunk_header &a, const chunk_header &b) { return a.index < b.index; });
+
+    bool ok = true;
+    size_t total = 0;
+    for (const chunk_header &h : hs) {
+        const size_t cnt = h.used / sizeof(T);
+        if (cnt == 0) continue;
+        std::vector<T> buf(cnt);
+        int fd = open(h.filename.c_str(), O_RDONLY);
+        CHECK(fd >= 0) << "could not open iota output " << h.filename;
+        ssize_t r = pread(fd, buf.data(), h.used, (off_t) h.begin_address);
+        CHECK(r == (ssize_t) h.used) << "short read of iota output " << h.filename;
+        close(fd);
+        const size_t base = h.index * per;
+        for (size_t j = 0; j < cnt; j++) {
+            if (!(buf[j] == make(base + j))) { ok = false; break; }
+        }
+        total += cnt;
+    }
+    total_out = total;
+    return ok;
+}
+
+// Run one iota case end-to-end: structure + element count + values-in-order.
+template<typename T, typename MakeFn>
+void RunIotaCase(const std::string &name, const std::string &prefix,
+                 size_t n, MakeFn make) {
+    const size_t num_chunks = IotaChunkCount<T>(n);
+    std::cout << name << " (n=" << n << ", " << num_chunks << " chunks, "
+              << (num_chunks + NUM_SSDS - 1) / NUM_SSDS << " batch(es))" << std::endl;
+
+    std::vector<std::string> files;
+    External_Sequence out = RunIota<T>(prefix, n, files);
+
+    CheckIotaInvariants<T>(out, n, OutputNames(prefix), name);
+    size_t total = 0;
+    bool data_ok = VerifyIotaData<T>(out, make, total);
+    Check(total == n, name + ": element count == n");
+    Check(data_ok && total == n, name + ": values equal iota in stable index order");
+    RemoveFiles(files);
+}
+
+// --- Tests -----------------------------------------------------------------
+
+// Batch-boundary coverage: a single element, a single full chunk, an under-full
+// batch, an exactly full batch, one chunk past a batch, and a multi-batch run.
+// The non-multiple sizes exercise the partial-tail path; the >NUM_SSDS sizes
+// exercise the per-slot bad_flags path (slots with no chunk in the final batch).
+void TestIotaBatchBoundaries() {
+    const size_t per = IotaElemsPerChunk<size_t>();
+    auto idv = [](size_t g) { return (size_t) g; };
+    auto N = [per](size_t chunks, size_t tail) { return (chunks - 1) * per + tail; };
+
+    RunIotaCase<size_t>("TestIotaSingleElement",  "eitest_one",   1,                            idv);
+    RunIotaCase<size_t>("TestIotaSingleFullChunk","eitest_full1", per,                          idv);
+    RunIotaCase<size_t>("TestIotaUnderFullBatch", "eitest_under", N(NUM_SSDS - 1, per / 3 + 1), idv);
+    RunIotaCase<size_t>("TestIotaExactBatch",     "eitest_exact", N(NUM_SSDS,     per),         idv);
+    RunIotaCase<size_t>("TestIotaOverBatch",      "eitest_over",  N(NUM_SSDS + 1, 7),           idv);
+    RunIotaCase<size_t>("TestIotaMultiBatch",     "eitest_multi", N(2 * NUM_SSDS + 5, per / 2 - 3), idv);
+}
+
+// Final-chunk accounting: the header's `used` must reflect only in-range
+// elements, never the full 4 MiB buffer. A one-element tail (most padding) and
+// an exact-multiple tail (no padding) bracket the boundary.
+void TestIotaPartialTail() {
+    const size_t per = IotaElemsPerChunk<size_t>();
+    auto idv = [](size_t g) { return (size_t) g; };
+    auto N = [per](size_t chunks, size_t tail) { return (chunks - 1) * per + tail; };
+
+    RunIotaCase<size_t>("TestIotaTailOneElement", "eitest_tail1", N(NUM_SSDS + 2, 1),   idv);
+    RunIotaCase<size_t>("TestIotaTailExact",      "eitest_taile", N(NUM_SSDS + 2, per), idv);
+}
+
+// Non-size_t element type: a 16-byte record whose second word is derived from
+// the value, catching truncation, misalignment, or wrong sizeof(T) handling.
+void TestIotaRecordType() {
+    const size_t per = IotaElemsPerChunk<Iota16>();
+    auto mk = [](size_t g) { return Iota16(g); };
+    const size_t n = (2 * NUM_SSDS + 3 - 1) * per + per / 4 + 5;  // multi-batch, partial tail
+    RunIotaCase<Iota16>("TestIotaRecordType", "eitest_rec", n, mk);
+}
+
+// Determinism: although chunks are placed on random SSDs, the logical
+// reconstruction and the per-index `used` accounting (a function of n alone)
+// must be identical across runs.
+void TestIotaDeterminism() {
+    const size_t per = IotaElemsPerChunk<size_t>();
+    const size_t n = (2 * NUM_SSDS + 4 - 1) * per + per / 2;  // multi-batch, partial tail
+    auto idv = [](size_t g) { return (size_t) g; };
+    std::cout << "TestIotaDeterminism (n=" << n << ", run twice)" << std::endl;
+
+    std::vector<std::string> files_a, files_b;
+    External_Sequence a = RunIota<size_t>("eitest_det_a", n, files_a);
+    External_Sequence b = RunIota<size_t>("eitest_det_b", n, files_b);
+
+    size_t ta = 0, tb = 0;
+    bool a_ok = VerifyIotaData<size_t>(a, idv, ta);
+    bool b_ok = VerifyIotaData<size_t>(b, idv, tb);
+    Check(a_ok && ta == n, "TestIotaDeterminism: first run reconstructs iota");
+    Check(b_ok && tb == n, "TestIotaDeterminism: second run reconstructs iota");
+
+    parlay::sequence<chunk_header> ha = a.ordered_underlying_sequence;
+    parlay::sequence<chunk_header> hb = b.ordered_underlying_sequence;
+    auto by_index = [](const chunk_header &x, const chunk_header &y) { return x.index < y.index; };
+    std::sort(ha.begin(), ha.end(), by_index);
+    std::sort(hb.begin(), hb.end(), by_index);
+    bool same = (ha.size() == hb.size());
+    for (size_t i = 0; same && i < ha.size(); i++) {
+        if (ha[i].index != hb[i].index || ha[i].used != hb[i].used) same = false;
+    }
+    Check(same, "TestIotaDeterminism: per-index chunk sizes identical across runs");
+
+    RemoveFiles(files_a);
+    RemoveFiles(files_b);
+}
+
+// Memory test: several full batches, confirming resident memory returns near
+// baseline afterwards. A regression where the per-batch NUM_SSDS * 4 MiB output
+// buffers leak would retain memory scaling with the batch count.
+void TestIotaMemoryBounded() {
+    const size_t per = IotaElemsPerChunk<size_t>();
+    const size_t num_chunks = 4 * NUM_SSDS;  // four full batches
+    const size_t n = num_chunks * per;
+    auto idv = [](size_t g) { return (size_t) g; };
+    std::cout << "TestIotaMemoryBounded (" << num_chunks << " chunks, "
+              << (num_chunks + NUM_SSDS - 1) / NUM_SSDS << " batches)" << std::endl;
+
+    const size_t rss_before = CurrentRssKb();
+    std::vector<std::string> files;
+    External_Sequence out = RunIota<size_t>("eitest_mem", n, files);
+    const size_t rss_after = CurrentRssKb();
+    const size_t peak = PeakRssKb();
+
+    CheckIotaInvariants<size_t>(out, n, OutputNames("eitest_mem"), "TestIotaMemoryBounded");
+    size_t total = 0;
+    bool data_ok = VerifyIotaData<size_t>(out, idv, total);
+    Check(data_ok && total == n, "TestIotaMemoryBounded: output still matches iota");
+
+    const size_t retained_kb = rss_after > rss_before ? rss_after - rss_before : 0;
+    const size_t leak_threshold_kb = 256 * 1024;  // 256 MiB
+    std::cout << "    rss before=" << rss_before / 1024 << " MiB, after="
+              << rss_after / 1024 << " MiB, retained=" << retained_kb / 1024
+              << " MiB, peak=" << peak / 1024 << " MiB" << std::endl;
+    Check(retained_kb < leak_threshold_kb,
+          "TestIotaMemoryBounded: resident memory returns near baseline (no per-batch leak)");
+
+    RemoveFiles(files);
+}
+
 }  // namespace
 
 int main() {
@@ -408,6 +682,14 @@ int main() {
     TestDeterminism();
     TestMemoryBounded();
 
+    std::cout << "=== ExternalIota tests ===" << std::endl;
+
+    TestIotaBatchBoundaries();
+    TestIotaPartialTail();
+    TestIotaRecordType();
+    TestIotaDeterminism();
+    TestIotaMemoryBounded();
+
     std::cout << "============================" << std::endl;
     if (g_failures == 0) {
         std::cout << "All tests passed." << std::endl;
@@ -417,6 +699,7 @@ int main() {
     return 1;
 }
 
+#ifdef ENABLE_EXTERNAL_SEQ_DEMO
 // Original randPerm/map/filter/scan demo, kept for reference. Not run by main().
 void legacyDemo() {
     externalSeq<size_t> nums = externalSeqOps::randPerm<size_t>("nums", 24);
@@ -434,6 +717,7 @@ void mapThroughput() {
     timer.next("Start map");
     auto result = externalSeqOps::reduce<>(nums, add, (size_t)0);
     double time = timer.next_time();
-    double throughput = GetThroughput(nums.files, time);
+    double throughput = GetThroughput(nums.files.to_vector(), time);
     std::cout << "throughput is " << throughput << " GB per sec" <<  std::endl;
 }
+#endif  // ENABLE_EXTERNAL_SEQ_DEMO

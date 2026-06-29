@@ -317,7 +317,7 @@ void put_in_mem(const std::vector<FileInfo> &files, const std::string &prefix, s
 } 
 
 template<typename T>
-std::vector<FileInfo> Scan(const std::vector<FileInfo> &files, const std::string &prefix) {
+ExternalSequence Scan(const std::vector<FileInfo> &files, const std::string &prefix) {
 
     std::vector<size_t> store(files.size());
     parlay::parallel_for(0, store.size(), [&](size_t i){

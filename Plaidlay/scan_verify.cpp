@@ -149,7 +149,7 @@ static bool test_randperm(size_t power_of_two) {
     }
 
 
-    auto out_files = Scan<size_t>(input.files, "rp_out");
+    auto out_files = Scan<size_t>(input.files.to_vector(), "rp_out");
     std::sort(out_files.begin(), out_files.end(),
               [](const FileInfo &a, const FileInfo &b) {
                   return a.file_index < b.file_index;
@@ -172,7 +172,7 @@ static bool test_randperm(size_t power_of_two) {
         }
     }
 
-    cleanup(input.files);
+    cleanup(input.files.to_vector());
     cleanup(out_files);
 
     if (errors == 0 && pos == n) {

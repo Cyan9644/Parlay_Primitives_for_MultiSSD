@@ -5,6 +5,7 @@
 #include "sequence_algorithms/filter.h"
 #include "sequence_algorithms/reduce.h"
 #include "scan.h"
+#include <parlay/sequence.h>
 #include <vector>
 
 
@@ -23,11 +24,13 @@ class externalSeq {
     private:
     public:
         // I'm making these public since this class is basically jsut a wrapper, behaves like a struct
-        std::vector<FileInfo> files;
+        parlay::sequence<FileInfo> files;
         // the prefix that all of the file names start with
         std::string prefix;
         externalSeq() {}
-        externalSeq(std::vector<FileInfo> files, std::string prefix) : files(files), prefix(prefix) {}
+        // FindFiles / GetFileInfo hand us a std::vector<FileInfo>, so accept that and
+        // convert into the parlay::sequence we store internally.
+        externalSeq(const std::vector<FileInfo>& files, std::string prefix) : files(files.begin(), files.end()), prefix(prefix) {}
         ~externalSeq() {}
 
         // TODO: at least for now, we can't support these. depends on how we do delaying I guess
@@ -76,7 +79,7 @@ namespace externalSeqOps {
     template <typename T, typename R = T, bool in_place = sizeof(T) == sizeof(R)>
     externalSeq<R> map(externalSeq<T> seq, const std::string& new_prefix, std::function<R(T)> f) {
     //always do out of place for now, I get a crash in place
-        Map<T, R, false>(seq.files, new_prefix, f);
+        Map<T, R, false>(seq.files.to_vector(), new_prefix, f);
         auto new_files = FindFiles(new_prefix);
         GetFileInfo(new_files);
         return externalSeq<T>(new_files, new_prefix);
@@ -85,13 +88,13 @@ namespace externalSeqOps {
     template <typename T, typename U=T, typename Func>
     auto reduce(const externalSeq<T>& seq, Func f, U identity) {
         parlay::monoid monoid(f, identity);
-        return Reduce<T, U>(seq.files, monoid);
+        return Reduce<T, U>(seq.files.to_vector(), monoid);
     }
     // filter, we take a seq and a boolean predicate
     // Func here maps T -> bool
     template <typename T, typename Func>
     externalSeq<T> filter (const externalSeq<T>& seq, const std::string& new_prefix, Func f) {
-        Filter<T>(seq.files, new_prefix, f);
+        Filter<T>(seq.files.to_vector(), new_prefix, f);
         auto new_files = FindFiles(new_prefix);
         GetFileInfo(new_files);
         return externalSeq<T>(new_files, new_prefix);
@@ -101,7 +104,7 @@ namespace externalSeqOps {
     //test for naive file scan
     template <typename T>
     externalSeq<T> naiveScan(const externalSeq<T>& seq, const std::string& new_prefix){
-        Scan<T>(seq.files, new_prefix);
+        Scan<T>(seq.files.to_vector(), new_prefix);
         auto filer = FindFiles(new_prefix);
         GetFileInfo(filer);
         return externalSeq<T>(filer, new_prefix);
