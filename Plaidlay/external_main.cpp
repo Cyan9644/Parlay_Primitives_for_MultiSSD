@@ -14,6 +14,8 @@
 
 #include "externalFilter.h"
 #include "ExternalIota.h"
+#include "ExternalMap.h"
+#include "ExternalReduce.h"
 
 // The legacy randPerm/map/filter/scan demo (legacyDemo/mapThroughput, defined at
 // the bottom of this file) depends on externalSeq.h, which currently pulls in the
@@ -670,6 +672,308 @@ void TestIotaMemoryBounded() {
     RemoveFiles(files);
 }
 
+// ===========================================================================
+//  Correctness tests for ExternalMap (Plaidlay/ExternalMap.h)
+//
+//  ExternalMap reads an input External_Sequence, applies `f` to every element,
+//  and writes the results back out. It is element-for-element, so each input
+//  chunk maps to one output block when sizeof(R) <= sizeof(T), and fans out into
+//  several output blocks when sizeof(R) > sizeof(T). Sorting the output by
+//  `index` reproduces a stable global order; indices are re-densified to
+//  0..M-1 after the fan-out.
+// ===========================================================================
+
+// Structural invariants for any successful map: whole-element byte counts that
+// never exceed a block, output filenames drawn only from the provided set,
+// indices forming exactly {0, ..., M-1}, and a total element count equal to the
+// input's (map is element-for-element).
+template<typename R>
+void CheckMapInvariants(const External_Sequence &out, size_t total_elems,
+                        const std::vector<std::string> &out_names,
+                        const std::string &name) {
+    const parlay::sequence<chunk_header> &hs = out.ordered_underlying_sequence;
+    std::unordered_set<std::string> allowed(out_names.begin(), out_names.end());
+
+    bool ok = true;
+    size_t sum_elems = 0;
+    std::vector<size_t> indices;
+    indices.reserve(hs.size());
+    for (const chunk_header &h : hs) {
+        if (h.used % sizeof(R) != 0) ok = false;        // whole elements only
+        if (h.used > kBufferBytes) ok = false;           // never exceeds a block
+        if (allowed.find(h.filename) == allowed.end()) ok = false;  // valid sink
+        sum_elems += h.used / sizeof(R);
+        indices.push_back(h.index);
+    }
+    std::sort(indices.begin(), indices.end());
+    for (size_t i = 0; i < indices.size(); i++) {
+        if (indices[i] != i) ok = false;  // a permutation of 0..M-1, no dup/gap
+    }
+    if (sum_elems != total_elems) ok = false;
+    Check(ok, name + ": output header invariants (count/index/size/filename)");
+}
+
+// Build `num_chunks` chunks of T (numbered sequentially via make(global_index)),
+// run ExternalMap<T,R> with `f`, read the result back, and compare against the
+// in-memory reference f(make(0)), f(make(1)), ... in order. `len(chunk_index)`
+// sets each chunk's length.
+template<typename T, typename R, typename MakeFn, typename LenFn, typename MapFn>
+void RunMapCase(const std::string &name, const std::string &prefix,
+                size_t num_chunks, MakeFn make, LenFn len, MapFn f) {
+    std::cout << name << " (" << num_chunks << " chunks, "
+              << (num_chunks + NUM_SSDS - 1) / NUM_SSDS << " batch(es))" << std::endl;
+
+    std::vector<std::vector<T>> chunks;
+    std::vector<R> reference;
+    size_t counter = 0;
+    for (size_t c = 0; c < num_chunks; c++) {
+        const size_t n = len(c);
+        std::vector<T> chunk;
+        chunk.reserve(n);
+        for (size_t k = 0; k < n; k++) {
+            const T v = make(counter++);
+            chunk.push_back(v);
+            reference.push_back(f(v));
+        }
+        chunks.push_back(std::move(chunk));
+    }
+
+    std::vector<std::string> files;
+    External_Sequence in = BuildInput<T>(prefix, chunks, files);
+    std::vector<std::string> out_names = MakeOutputNames(prefix);
+    files.insert(files.end(), out_names.begin(), out_names.end());
+
+    External_Sequence out = ExternalMap<T, R>(in, f, out_names);
+    std::vector<R> got = ReadOutput<R>(out);
+
+    CheckMapInvariants<R>(out, reference.size(), OutputNames(prefix), name);
+    Check(got.size() == reference.size(), name + ": element count matches reference");
+    Check(got == reference, name + ": values match reference in stable index order");
+    RemoveFiles(files);
+}
+
+// --- Map tests -------------------------------------------------------------
+
+// Batch-boundary coverage (same-type map, FANOUT == 1): single chunk, under-full
+// batch, exact batch, one past a batch, and a multi-batch partial tail.
+void TestMapBatchBoundaries() {
+    auto make = [](size_t i) { return (size_t) i; };
+    auto f = [](size_t x) { return x * 2 + 1; };
+    RunMapCase<size_t, size_t>("TestMapSingleChunk",  "emtest_one",   1,                make, VariedLen, f);
+    RunMapCase<size_t, size_t>("TestMapUnderFull",    "emtest_under", NUM_SSDS - 1,     make, VariedLen, f);
+    RunMapCase<size_t, size_t>("TestMapExactBatch",   "emtest_exact", NUM_SSDS,         make, VariedLen, f);
+    RunMapCase<size_t, size_t>("TestMapOverBatch",    "emtest_over",  NUM_SSDS + 1,     make, VariedLen, f);
+    RunMapCase<size_t, size_t>("TestMapMultiBatch",   "emtest_multi", 2 * NUM_SSDS + 5, make, VariedLen, f);
+}
+
+// Many tiny chunks: stresses per-chunk header bookkeeping and the stable sort.
+void TestMapManyTinyChunks() {
+    auto make = [](size_t i) { return (size_t) i; };
+    auto f = [](size_t x) { return x ^ 0xABCDull; };
+    RunMapCase<size_t, size_t>("TestMapManyTinyChunks", "emtest_tiny", 4 * NUM_SSDS + 9,
+                               make, TinyLen, f);
+}
+
+// Shrinking type change (size_t -> int, sizeof(R) < sizeof(T), FANOUT == 1):
+// confirms type-changing output is written and read back correctly.
+void TestMapShrinkType() {
+    auto make = [](size_t i) { return (size_t) i; };
+    auto f = [](size_t x) { return (int) (x % 100000); };
+    RunMapCase<size_t, int>("TestMapShrinkType", "emtest_shrink", 2 * NUM_SSDS + 3,
+                            make, VariedLen, f);
+}
+
+// 16-byte record map (FANOUT == 1): the whole record is compared, catching
+// truncation or misalignment in the read/map/write path.
+void TestMapRecordType() {
+    auto make = [](size_t i) { return Record{(uint64_t) i, (uint64_t) (i * 1000003ull + 7)}; };
+    auto f = [](Record r) { return Record{r.key + 1, r.tag ^ 0xFFFFull}; };
+    RunMapCase<Record, Record>("TestMapRecordType", "emtest_rec", 2 * NUM_SSDS + 3,
+                               make, VariedLen, f);
+}
+
+// Growing type change with fan-out (uint8_t -> uint64_t, FANOUT == 8). One large
+// chunk (> out_cap = 4 MiB / 8 = 512 Ki elements) must split into several output
+// blocks, exercising the fan-out split and the index re-densification. The
+// output chunk count must exceed the input chunk count.
+void TestMapGrowFanout() {
+    const std::string name = "TestMapGrowFanout";
+    const size_t out_cap = (4u << 20) / sizeof(uint64_t);   // 512 Ki
+    const size_t big = out_cap + out_cap / 2 + 17;          // ~1.5 output blocks
+    std::cout << name << " (1 chunk of " << big << " uint8 -> uint64)" << std::endl;
+
+    auto make = [](size_t i) { return (uint8_t) (i * 31 + 7); };
+    auto f = [](uint8_t v) { return (uint64_t) v * 2654435761ull + 12345ull; };
+
+    std::vector<std::vector<uint8_t>> chunks(1);
+    std::vector<uint64_t> reference;
+    reference.reserve(big);
+    for (size_t k = 0; k < big; k++) {
+        const uint8_t v = make(k);
+        chunks[0].push_back(v);
+        reference.push_back(f(v));
+    }
+
+    std::vector<std::string> files;
+    External_Sequence in = BuildInput<uint8_t>("emtest_grow", chunks, files);
+    std::vector<std::string> out_names = MakeOutputNames("emtest_grow");
+    files.insert(files.end(), out_names.begin(), out_names.end());
+
+    External_Sequence out = ExternalMap<uint8_t, uint64_t>(in, f, out_names);
+    std::vector<uint64_t> got = ReadOutput<uint64_t>(out);
+
+    CheckMapInvariants<uint64_t>(out, reference.size(), OutputNames("emtest_grow"), name);
+    Check(out.ordered_underlying_sequence.size() > chunks.size(),
+          name + ": one input chunk fanned out into multiple output blocks");
+    Check(got.size() == reference.size(), name + ": element count matches reference");
+    Check(got == reference, name + ": values match reference in stable index order");
+    RemoveFiles(files);
+}
+
+// Memory test: several full batches, confirming resident memory returns near
+// baseline. A regression where the per-batch output buffers leak would retain
+// memory scaling with the batch count. Verified by streaming (one block at a
+// time) to avoid the test itself holding a huge reference.
+void TestMapMemoryBounded() {
+    const size_t per = (4u << 20) / sizeof(size_t);  // full chunk = 512 Ki elements
+    const size_t num_chunks = 4 * NUM_SSDS;          // four full batches
+    auto make = [](size_t i) { return (size_t) i; };
+    auto f = [](size_t x) { return x * 3 + 1; };
+    std::cout << "TestMapMemoryBounded (" << num_chunks << " chunks, "
+              << (num_chunks + NUM_SSDS - 1) / NUM_SSDS << " batches)" << std::endl;
+
+    std::vector<std::vector<size_t>> chunks(num_chunks);
+    size_t counter = 0;
+    for (size_t c = 0; c < num_chunks; c++) {
+        chunks[c].reserve(per);
+        for (size_t k = 0; k < per; k++) chunks[c].push_back(make(counter++));
+    }
+
+    std::vector<std::string> files;
+    External_Sequence in = BuildInput<size_t>("emtest_mem", chunks, files);
+    std::vector<std::string> out_names = MakeOutputNames("emtest_mem");
+    files.insert(files.end(), out_names.begin(), out_names.end());
+    chunks.clear();
+    chunks.shrink_to_fit();
+
+    const size_t rss_before = CurrentRssKb();
+    External_Sequence out = ExternalMap<size_t, size_t>(in, f, out_names);
+    const size_t rss_after = CurrentRssKb();
+    const size_t peak = PeakRssKb();
+
+    CheckMapInvariants<size_t>(out, num_chunks * per, OutputNames("emtest_mem"),
+                               "TestMapMemoryBounded");
+
+    // Stream the output in index order and check each element equals f(make(g)).
+    parlay::sequence<chunk_header> hs = out.ordered_underlying_sequence;
+    std::sort(hs.begin(), hs.end(),
+              [](const chunk_header &a, const chunk_header &b) { return a.index < b.index; });
+    size_t g = 0;
+    bool data_ok = true;
+    for (const chunk_header &h : hs) {
+        const size_t n = h.used / sizeof(size_t);
+        if (n == 0) continue;
+        std::vector<size_t> buf(n);
+        int fd = open(h.filename.c_str(), O_RDONLY);
+        CHECK(fd >= 0) << "could not open output file " << h.filename;
+        ssize_t r = pread(fd, buf.data(), h.used, (off_t) h.begin_address);
+        CHECK(r == (ssize_t) h.used) << "short read of output " << h.filename;
+        close(fd);
+        for (size_t k = 0; k < n; k++) {
+            if (buf[k] != f(make(g))) data_ok = false;
+            g++;
+        }
+    }
+    Check(data_ok && g == num_chunks * per, "TestMapMemoryBounded: output still matches map");
+
+    const size_t retained_kb = rss_after > rss_before ? rss_after - rss_before : 0;
+    const size_t leak_threshold_kb = 256 * 1024;  // 256 MiB
+    std::cout << "    rss before=" << rss_before / 1024 << " MiB, after="
+              << rss_after / 1024 << " MiB, retained=" << retained_kb / 1024
+              << " MiB, peak=" << peak / 1024 << " MiB" << std::endl;
+    Check(retained_kb < leak_threshold_kb,
+          "TestMapMemoryBounded: resident memory returns near baseline (no per-batch leak)");
+
+    RemoveFiles(files);
+}
+
+// ===========================================================================
+//  Correctness tests for ExternalReduce (Plaidlay/ExternalReduce.h)
+//
+//  ExternalReduce streams every element of an External_Sequence through an
+//  associative `op` (wrapped in a parlay::monoid) and returns the single folded
+//  value. T is the on-disk element type; R the accumulator type (may differ).
+// ===========================================================================
+
+// Build `num_chunks` chunks of T, run ExternalReduce<T,R> with op/identity, and
+// compare against an in-memory fold of the same elements. `op` must be
+// associative (the tests use commutative ops too, so build order is irrelevant).
+template<typename T, typename R, typename MakeFn, typename LenFn, typename Op>
+void RunReduceCase(const std::string &name, const std::string &prefix,
+                   size_t num_chunks, MakeFn make, LenFn len, Op op, R identity) {
+    std::cout << name << " (" << num_chunks << " chunks, "
+              << (num_chunks + NUM_SSDS - 1) / NUM_SSDS << " batch(es))" << std::endl;
+
+    std::vector<std::vector<T>> chunks;
+    R reference = identity;
+    size_t counter = 0;
+    for (size_t c = 0; c < num_chunks; c++) {
+        const size_t n = len(c);
+        std::vector<T> chunk;
+        chunk.reserve(n);
+        for (size_t k = 0; k < n; k++) {
+            const T v = make(counter++);
+            chunk.push_back(v);
+            reference = op(reference, v);
+        }
+        chunks.push_back(std::move(chunk));
+    }
+
+    std::vector<std::string> files;
+    External_Sequence in = BuildInput<T>(prefix, chunks, files);
+    R got = ExternalReduce<T, R>(in, op, identity);
+    Check(got == reference, name + ": reduced value matches in-memory fold");
+    RemoveFiles(files);
+}
+
+// --- Reduce tests ----------------------------------------------------------
+
+// Sum over size_t across several batches with varied (non-block-aligned) chunk
+// lengths, including the partial-tail batch.
+void TestReduceSum() {
+    auto make = [](size_t i) { return (size_t) i; };
+    auto add = [](size_t a, size_t b) { return a + b; };
+    RunReduceCase<size_t, size_t>("TestReduceSum", "ertest_sum", 2 * NUM_SSDS + 5,
+                                  make, VariedLen, add, (size_t) 0);
+}
+
+// Max over size_t: a different associative op to confirm identity handling.
+void TestReduceMax() {
+    auto make = [](size_t i) { return (size_t) ((i * 2654435761ull) & 0xFFFFFFFFull); };
+    auto mx = [](size_t a, size_t b) { return std::max(a, b); };
+    RunReduceCase<size_t, size_t>("TestReduceMax", "ertest_max", NUM_SSDS + 7,
+                                  make, VariedLen, mx, (size_t) 0);
+}
+
+// Type-changing reduce: sum 32-bit int elements into a 64-bit accumulator. The
+// op accepts (size_t, int) for the streaming fold and (size_t, size_t) for the
+// final fold over per-worker partials.
+void TestReduceTypeChange() {
+    auto make = [](size_t i) { return (int) (i % 50000); };
+    auto add = [](size_t a, auto b) { return a + (size_t) b; };
+    RunReduceCase<int, size_t>("TestReduceTypeChange", "ertest_typ", 2 * NUM_SSDS + 4,
+                               make, VariedLen, add, (size_t) 0);
+}
+
+// All-empty chunks must reduce to the identity (exercises the zero-length chunk
+// path in the reader and the size == 0 loop in ExternalReduce).
+void TestReduceEmpty() {
+    auto make = [](size_t i) { return (size_t) i; };
+    auto add = [](size_t a, size_t b) { return a + b; };
+    RunReduceCase<size_t, size_t>("TestReduceEmpty", "ertest_empty", NUM_SSDS + 3,
+                                  make, [](size_t) { return (size_t) 0; }, add, (size_t) 0);
+}
+
 }  // namespace
 
 int main() {
@@ -689,6 +993,22 @@ int main() {
     TestIotaRecordType();
     TestIotaDeterminism();
     TestIotaMemoryBounded();
+
+    std::cout << "=== ExternalMap tests ===" << std::endl;
+
+    TestMapBatchBoundaries();
+    TestMapManyTinyChunks();
+    TestMapShrinkType();
+    TestMapRecordType();
+    TestMapGrowFanout();
+    TestMapMemoryBounded();
+
+    std::cout << "=== ExternalReduce tests ===" << std::endl;
+
+    TestReduceSum();
+    TestReduceMax();
+    TestReduceTypeChange();
+    TestReduceEmpty();
 
     std::cout << "============================" << std::endl;
     if (g_failures == 0) {
