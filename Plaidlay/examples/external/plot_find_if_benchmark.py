@@ -229,8 +229,10 @@ def main():
     ap.add_argument("--repeats", type=int, default=1, help="timed repeats per point (keeps best)")
     ap.add_argument("--pos-frac", type=float, default=1.0,
                     help="match position as a fraction of n (1.0 = last element, worst case)")
-    ap.add_argument("--ssd-base", default="/mnt/ssd",
-                    help="SSD mount prefix; files go to <ssd-base>0../mnt point per SSD")
+    ap.add_argument("--ssd-base", default="",
+                    help="SSD mount prefix; files go to <ssd-base>0/, <ssd-base>1/, ... one "
+                         "per SSD (e.g. --ssd-base /mnt/ssd). Default \"\" writes flat scratch "
+                         "files in the cwd (no root-owned mounts needed), like the primes benchmark.")
     ap.add_argument("--binary", default=DEFAULT_BINARY,
                     help="path to the compiled find_if_benchmark binary")
     ap.add_argument("--timeout", type=float, default=3600.0, help="per-run timeout in seconds")

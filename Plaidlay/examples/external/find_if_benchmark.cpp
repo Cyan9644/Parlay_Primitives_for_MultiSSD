@@ -29,9 +29,12 @@
 //       -lpthread -luring <abseil log libs>
 //
 // Run (defaults sweep 2^30 .. 2^36, one timed repeat, match at the last
-// element, SSD mounts at /mnt/ssd0../mnt/ssd29). The upper bound is 2^36
+// element, scratch files written flat in the cwd). The upper bound is 2^36
 // because the in-memory side cannot hold a larger sequence in DRAM:
 //   ./find_if_benchmark [min_exp] [max_exp] [repeats] [pos_frac] [ssd_base]
+// ssd_base defaults to "" (flat files in the cwd, like primes_scaling_benchmark).
+// Pass a mount prefix such as /mnt/ssd to spread one file per physical SSD across
+// /mnt/ssd0../mnt/ssd29 instead (those mount dirs must exist and be writable).
 
 #include "extern_find_if.h"                  // external find_if + reader/writer/External_Sequence
 #include "examples/in_memory/find_if.h"      // in-memory find_if (overload on Range)
@@ -65,12 +68,22 @@ double SecondsSince(std::chrono::steady_clock::time_point start) {
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 }
 
-// One file per SSD, e.g. /mnt/ssd0/find_if_bench_e30 .. /mnt/ssd29/find_if_bench_e30.
+// One file per SSD. With a non-empty ssd_base the files land on the per-SSD
+// mounts, e.g. /mnt/ssd0/find_if_bench_e30 .. /mnt/ssd29/find_if_bench_e30
+// (requires those mount directories to exist and be writable). With an empty
+// ssd_base the files are flat names created in the current working directory --
+// e.g. find_if_bench_e30_ssd0 .. find_if_bench_e30_ssd29 -- which mirrors how
+// primes_scaling_benchmark writes its scratch files and works without root-owned
+// SSD mounts.
 std::vector<std::string> SsdFiles(const std::string &ssd_base, int exp) {
     std::vector<std::string> names;
     names.reserve(NUM_SSDS);
     for (int i = 0; i < NUM_SSDS; i++) {
-        names.push_back(ssd_base + std::to_string(i) + "/find_if_bench_e" + std::to_string(exp));
+        if (ssd_base.empty()) {
+            names.push_back("find_if_bench_e" + std::to_string(exp) + "_ssd" + std::to_string(i));
+        } else {
+            names.push_back(ssd_base + std::to_string(i) + "/find_if_bench_e" + std::to_string(exp));
+        }
     }
     return names;
 }
@@ -239,7 +252,7 @@ int main(int argc, char **argv) {
     int max_exp = 36;
     int repeats = 1;
     double pos_frac = 1.0;          // match at the last element (worst case) by default
-    std::string ssd_base = "/mnt/ssd";
+    std::string ssd_base = "";      // empty => flat scratch files in the cwd (primes-style)
 
     if (argc >= 2) min_exp = std::atoi(argv[1]);
     if (argc >= 3) max_exp = std::atoi(argv[2]);

@@ -228,7 +228,6 @@
 template<typename T, typename UnaryPredicate>
 size_t find_if(External_Sequence& seq, UnaryPredicate&& p){
 
-    size_t n = seq.size();
     auto& chunk_headers = seq.ordered_underlying_sequence;
     UnorderedChunkReader<T, 4 << 20> reader;
     reader.PrepFiles(chunk_headers);
@@ -239,8 +238,17 @@ size_t find_if(External_Sequence& seq, UnaryPredicate&& p){
 
     constexpr size_t buffer_size_bytes = 4 << 20, buffer_size = buffer_size_bytes / sizeof(T);
 
+    // Total number of logical elements across all chunks. This is the "not
+    // found" sentinel (matching parlay::find_if, which returns the sequence
+    // length when no element satisfies the predicate). seq.size() is the *chunk*
+    // count, which is far smaller than any real element index, so it must not be
+    // used here -- doing so makes std::min below always collapse to that tiny
+    // value and the search returns the chunk count for every real match.
+    size_t n = 0;
+    for (const auto &h : chunk_headers) n += h.used / sizeof(T);
+
     size_t read_count = 0;
-    size_t a = n; 
+    size_t a = n;
 
     while(read_count <  expected_reads){
         std::vector<std::pair<bool, size_t>> flags(NUM_SSDS,{false, n});
