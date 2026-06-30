@@ -28,7 +28,8 @@ BENCH_OBJS := $(BENCH_SRCS:.cpp=.o)
 
 BINARIES := $(BINDIR)/speed_test $(BINDIR)/io_uring_test $(BINDIR)/sample_sort \
             $(BINDIR)/permutation $(BINDIR)/sequence  $(BINDIR)/plaidlaymain $(BINDIR)/externalSeqMain \
-            $(BINDIR)/scanVerify $(BINDIR)/primesBench $(BINDIR)/primesScaling
+            $(BINDIR)/scanVerify $(BINDIR)/primesBench $(BINDIR)/primesScaling \
+            $(BINDIR)/find_if_benchmark
 
 # Headers under Plaidlay/ are included by quote ("ExternalBoolean.h" etc.); add
 # -IPlaidlay so the examples can be compiled from outside that directory.
@@ -105,6 +106,9 @@ $(BINDIR)/primesBench: Plaidlay/examples/external/primes_benchmark.cpp $(UTIL_OB
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(PLAIDLAY_INC) $^ -o $@ $(LDFLAGS) -Wl,--start-group $(ABSL_LIBS) -Wl,--end-group
 
 $(BINDIR)/primesScaling: Plaidlay/examples/external/primes_scaling_benchmark.cpp $(UTIL_OBJS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(PLAIDLAY_INC) $^ -o $@ $(LDFLAGS) -Wl,--start-group $(ABSL_LIBS) -Wl,--end-group
+
+$(BINDIR)/find_if_benchmark: Plaidlay/examples/external/find_if_benchmark.cpp $(UTIL_OBJS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(PLAIDLAY_INC) $^ -o $@ $(LDFLAGS) -Wl,--start-group $(ABSL_LIBS) -Wl,--end-group
 
 # ── cleanup ────────────────────────────────────────────────────────────────────

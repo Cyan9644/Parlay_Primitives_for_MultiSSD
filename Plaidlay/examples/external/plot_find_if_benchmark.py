@@ -24,12 +24,12 @@ plotting is attempted only as a best-effort final step (skipped with a hint if
 matplotlib is missing). Copy the JSON to a machine that has matplotlib and
 re-render with `--plot-only`.
 
-The find_if_benchmark binary is not built by this script (the Plaidlay examples
-link against abseil/liburing). Build it once, e.g. from the Plaidlay/ directory:
-    g++ -std=c++17 -O2 -I . -I .. -I ../deps/abseil-cpp -I ./parlaylib/include \
-        examples/external/find_if_benchmark.cpp -o find_if_benchmark \
-        -lpthread -luring <abseil log link flags>
-then point this script at it with --binary if it is not at Plaidlay/find_if_benchmark.
+If the find_if_benchmark binary is missing, this script builds it on demand via
+`make bazel-bin/find_if_benchmark` (run from the repo root), the same way
+plot_primes_benchmark.py builds primesScaling. You can also build it by hand:
+    make bazel-bin/find_if_benchmark
+then point this script at it with --binary if it is not at
+bazel-bin/find_if_benchmark.
 
 Usage:
     python3 plot_find_if_benchmark.py                 # full 2**30 .. 2**36 sweep
@@ -51,7 +51,8 @@ import sys
 # .../Plaidlay/examples/external/plot_find_if_benchmark.py
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PLAIDLAY_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
-DEFAULT_BINARY = os.path.join(PLAIDLAY_DIR, "find_if_benchmark")
+REPO_ROOT = os.path.dirname(PLAIDLAY_DIR)
+DEFAULT_BINARY = os.path.join(REPO_ROOT, "bazel-bin", "find_if_benchmark")
 
 VARIANTS = ("mem", "ext")
 LABELS = {"mem": "in-memory", "ext": "external"}
@@ -63,6 +64,18 @@ DETAIL_RE = re.compile(
     r"in-memory:\s+([0-9.]+)\s+s(?:\s+\(lazy\))?\s+"
     r"external:\s+([0-9.]+)\s+s\s+\(external read\s+([0-9.]+)\s+GiB/s\)"
 )
+
+
+def ensure_binary(binary):
+    """Build bazel-bin/find_if_benchmark via make if it isn't there already.
+    Only auto-builds the default target; a custom --binary path is left to the
+    caller to provide."""
+    if os.path.exists(binary):
+        return
+    if os.path.abspath(binary) != os.path.abspath(DEFAULT_BINARY):
+        return  # not our target to build; let the existence check report it
+    print("find_if_benchmark not found; building with make...", file=sys.stderr)
+    subprocess.run(["make", "bazel-bin/find_if_benchmark"], cwd=REPO_ROOT, check=True)
 
 
 def run_one(binary, exp, repeats, pos_frac, ssd_base, timeout):
@@ -235,13 +248,12 @@ def main():
         plot(args.png, exponents, results)
         return
 
+    ensure_binary(args.binary)
     if not os.path.exists(args.binary):
         sys.exit(
             f"find_if_benchmark binary not found at {args.binary}.\n"
-            f"Build it (from the Plaidlay/ directory), e.g.:\n"
-            f"  g++ -std=c++17 -O2 -I . -I .. -I ../deps/abseil-cpp -I ./parlaylib/include \\\n"
-            f"      examples/external/find_if_benchmark.cpp -o find_if_benchmark \\\n"
-            f"      -lpthread -luring <abseil log link flags>\n"
+            f"Build it from the repo root with:\n"
+            f"  make bazel-bin/find_if_benchmark\n"
             f"then re-run, or pass --binary <path>."
         )
 
